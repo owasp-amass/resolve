@@ -1,5 +1,6 @@
 # Fast Use of DNS Resolvers
 
+![GitHub Test Status](https://github.com/caffix/resolvers/workflows/tests/badge.svg)
 [![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/caffix/resolvers?tab=overview)
 [![License](https://img.shields.io/github/license/caffix/resolvers)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Go Report](https://goreportcard.com/badge/github.com/caffix/resolvers)](https://goreportcard.com/report/github.com/caffix/resolvers)
