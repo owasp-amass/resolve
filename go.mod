@@ -1,4 +1,4 @@
-module github.com/caffix/resolvers
+module github.com/caffix/resolve
 
 go 1.16
 
