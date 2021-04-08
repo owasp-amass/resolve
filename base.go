@@ -320,6 +320,7 @@ func (r *baseResolver) responses() {
 					add = true
 				} else if len(responseTimes) > 5 && rtime.Sub(last) > time.Second {
 					r.calcNewRate(responseTimes)
+					responseTimes = []time.Time{}
 					last = time.Now()
 				}
 				if add {
@@ -351,7 +352,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 		avg = time.Second
 	}
 
-	r.setRateLimit(int(time.Second / avg))
+	r.setRateLimit(int(time.Second/avg) + 1)
 }
 
 func (r *baseResolver) handleReads() {
