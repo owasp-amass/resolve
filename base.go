@@ -17,6 +17,12 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+const (
+	maxDelayBetweenSamples time.Duration = 250 * time.Millisecond
+	minSamplingTime        time.Duration = 2 * time.Second
+	minSampleSetSize       int           = 5
+)
+
 type baseResolver struct {
 	sync.Mutex
 	stopped bool
@@ -228,7 +234,7 @@ func (r *baseResolver) sendQueries() {
 				if l := r.xchgQueue.Len(); !measuring && l > 0 {
 					r.measure <- now
 					measuring = true
-				} else if measuring && l == 0 && now.Sub(last) > (250*time.Millisecond) {
+				} else if measuring && l == 0 && now.Sub(last) > maxDelayBetweenSamples {
 					r.measure <- time.Time{}
 					measuring = false
 				}
@@ -328,7 +334,7 @@ func (r *baseResolver) responses() {
 					add = true
 				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
 					add = true
-				} else if rtime.Sub(last) > (2 * time.Second) {
+				} else if rtime.Sub(last) > minSamplingTime {
 					update()
 				}
 				if add {
@@ -348,7 +354,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	var last time.Time
 	var total time.Duration
 
-	if len(times) < 5 {
+	if len(times) < minSampleSetSize {
 		return
 	}
 
@@ -366,8 +372,8 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	avg -= time.Duration(float64(avg) * 0.25)
 
 	persec := int(time.Second / avg)
-	if persec < 4 {
-		persec = 4
+	if persec <= 1 {
+		persec = r.perSec
 	}
 	r.setRateLimit(persec)
 }
