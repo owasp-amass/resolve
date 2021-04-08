@@ -213,6 +213,7 @@ func (r *baseResolver) queueQuery(ctx context.Context, msg *dns.Msg, p int) *res
 }
 
 func (r *baseResolver) sendQueries() {
+	var last time.Time
 	var measuring bool
 
 	for {
@@ -223,14 +224,16 @@ func (r *baseResolver) sendQueries() {
 			if element, ok := r.xchgQueue.Next(); ok {
 				r.rateLimiterTake()
 
+				now := time.Now()
 				if l := r.xchgQueue.Len(); !measuring && l > 0 {
-					r.measure <- time.Now()
+					r.measure <- now
 					measuring = true
-				} else if measuring && l == 0 {
+				} else if measuring && l == 0 && now.Sub(last) > time.Second {
 					r.measure <- time.Time{}
 					measuring = false
 				}
 
+				last = now
 				r.writeMessage(element.(*resolveRequest))
 			}
 		}
@@ -294,6 +297,12 @@ func (r *baseResolver) responses() {
 	var responseTimes []time.Time
 	var collect, stopped, last time.Time
 
+	update := func() {
+		r.calcNewRate(responseTimes)
+		responseTimes = []time.Time{}
+		last = time.Now()
+	}
+
 	for {
 		select {
 		case <-r.done:
@@ -303,7 +312,7 @@ func (r *baseResolver) responses() {
 			if collect.IsZero() {
 				stopped = time.Now()
 			} else {
-				responseTimes = []time.Time{}
+				update()
 			}
 		default:
 		}
@@ -319,10 +328,8 @@ func (r *baseResolver) responses() {
 					add = true
 				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
 					add = true
-				} else if len(responseTimes) > 5 && rtime.Sub(last) > time.Second {
-					r.calcNewRate(responseTimes)
-					responseTimes = []time.Time{}
-					last = time.Now()
+				} else if len(responseTimes) > 5 && rtime.Sub(last) > (2*time.Second) {
+					update()
 				}
 				if add {
 					responseTimes = append(responseTimes, rtime)
@@ -341,6 +348,10 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	var last time.Time
 	var total time.Duration
 
+	if len(times) < 2 {
+		return
+	}
+
 	for i, t := range times {
 		if i > 0 {
 			total += t.Sub(last)
@@ -352,8 +363,9 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	if avg > time.Second {
 		avg = time.Second
 	}
+	avg -= time.Duration(float64(avg) * 0.25)
 
-	r.setRateLimit(int(time.Second/avg) + 1)
+	r.setRateLimit(int(time.Second / avg))
 }
 
 func (r *baseResolver) handleReads() {
