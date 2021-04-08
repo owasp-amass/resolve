@@ -228,7 +228,7 @@ func (r *baseResolver) sendQueries() {
 				if l := r.xchgQueue.Len(); !measuring && l > 0 {
 					r.measure <- now
 					measuring = true
-				} else if measuring && l == 0 && now.Sub(last) > time.Second {
+				} else if measuring && l == 0 && now.Sub(last) > (250*time.Millisecond) {
 					r.measure <- time.Time{}
 					measuring = false
 				}
@@ -328,7 +328,7 @@ func (r *baseResolver) responses() {
 					add = true
 				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
 					add = true
-				} else if len(responseTimes) > 5 && rtime.Sub(last) > (2*time.Second) {
+				} else if rtime.Sub(last) > (2 * time.Second) {
 					update()
 				}
 				if add {
@@ -348,7 +348,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	var last time.Time
 	var total time.Duration
 
-	if len(times) < 2 {
+	if len(times) < 5 {
 		return
 	}
 
@@ -365,7 +365,11 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	}
 	avg -= time.Duration(float64(avg) * 0.25)
 
-	r.setRateLimit(int(time.Second / avg))
+	persec := int(time.Second / avg)
+	if persec < 4 {
+		persec = 4
+	}
+	r.setRateLimit(persec)
 }
 
 func (r *baseResolver) handleReads() {
