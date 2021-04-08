@@ -23,6 +23,7 @@ type baseResolver struct {
 	done    chan struct{}
 	// Rate limiter to enforce the maximum DNS queries
 	rlimit           ratelimit.Limiter
+	measure          chan time.Time
 	xchgQueue        queue.Queue
 	xchgs            *xchgManager
 	readMsgs         queue.Queue
@@ -64,6 +65,7 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	r := &baseResolver{
 		done:      make(chan struct{}, 2),
 		rlimit:    ratelimit.New(perSec, ratelimit.WithoutSlack),
+		measure:   make(chan time.Time, 2),
 		xchgQueue: queue.NewQueue(),
 		xchgs:     newXchgManager(),
 		readMsgs:  queue.NewQueue(),
@@ -109,6 +111,20 @@ func (r *baseResolver) Stopped() bool {
 // String implements the Stringer interface.
 func (r *baseResolver) String() string {
 	return r.address
+}
+
+func (r *baseResolver) rateLimiterTake() {
+	r.Lock()
+	defer r.Unlock()
+
+	r.rlimit.Take()
+}
+
+func (r *baseResolver) setRateLimit(perSec int) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.rlimit = ratelimit.New(perSec, ratelimit.WithoutSlack)
 }
 
 // Query implements the Resolver interface.
@@ -196,13 +212,24 @@ func (r *baseResolver) queueQuery(ctx context.Context, msg *dns.Msg, p int) *res
 }
 
 func (r *baseResolver) sendQueries() {
+	var measuring bool
+
 	for {
 		select {
 		case <-r.done:
 			return
 		case <-r.xchgQueue.Signal():
 			if element, ok := r.xchgQueue.Next(); ok {
-				r.rlimit.Take()
+				r.rateLimiterTake()
+
+				if l := r.xchgQueue.Len(); !measuring && l > 0 {
+					r.measure <- time.Now()
+					measuring = true
+				} else if measuring && l == 0 {
+					r.measure <- time.Time{}
+					measuring = false
+				}
+
 				r.writeMessage(element.(*resolveRequest))
 			}
 		}
@@ -263,15 +290,42 @@ type readMsg struct {
 }
 
 func (r *baseResolver) responses() {
+	var responseTimes []time.Time
+	var collect, stopped, last time.Time
+
 	for {
 		select {
 		case <-r.done:
 			return
+		case t := <-r.measure:
+			collect = t
+			if collect.IsZero() {
+				stopped = time.Now()
+			} else {
+				responseTimes = []time.Time{}
+			}
 		default:
 		}
 
 		if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+			rtime := time.Now()
+
 			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+				var add bool
+
+				// Collect resolver response times
+				if !collect.IsZero() && req.Timestamp.After(collect) {
+					add = true
+				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
+					add = true
+				} else if len(responseTimes) > 5 && rtime.Sub(last) > time.Second {
+					r.calcNewRate(responseTimes)
+					last = time.Now()
+				}
+				if add {
+					responseTimes = append(responseTimes, rtime)
+				}
+
 				r.readMsgs.Append(&readMsg{
 					Req:  req,
 					Resp: m,
@@ -279,6 +333,25 @@ func (r *baseResolver) responses() {
 			}
 		}
 	}
+}
+
+func (r *baseResolver) calcNewRate(times []time.Time) {
+	var last time.Time
+	var total time.Duration
+
+	for i, t := range times {
+		if i > 0 {
+			total += t.Sub(last)
+		}
+		last = t
+	}
+
+	avg := total / time.Duration(len(times)-1)
+	if avg > time.Second {
+		avg = time.Second
+	}
+
+	r.setRateLimit(int(time.Second / avg))
 }
 
 func (r *baseResolver) handleReads() {
