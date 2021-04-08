@@ -22,6 +22,7 @@ type baseResolver struct {
 	stopped bool
 	done    chan struct{}
 	// Rate limiter to enforce the maximum DNS queries
+	ratelock         sync.Mutex
 	rlimit           ratelimit.Limiter
 	measure          chan time.Time
 	xchgQueue        queue.Queue
@@ -114,15 +115,15 @@ func (r *baseResolver) String() string {
 }
 
 func (r *baseResolver) rateLimiterTake() {
-	r.Lock()
-	defer r.Unlock()
+	r.ratelock.Lock()
+	defer r.ratelock.Unlock()
 
 	r.rlimit.Take()
 }
 
 func (r *baseResolver) setRateLimit(perSec int) {
-	r.Lock()
-	defer r.Unlock()
+	r.ratelock.Lock()
+	defer r.ratelock.Unlock()
 
 	r.rlimit = ratelimit.New(perSec, ratelimit.WithoutSlack)
 }
