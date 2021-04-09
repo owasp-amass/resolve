@@ -30,7 +30,7 @@ type baseResolver struct {
 	// Rate limiter to enforce the maximum DNS queries
 	ratelock         sync.Mutex
 	rlimit           ratelimit.Limiter
-	measure          chan time.Time
+	sampleQueue      queue.Queue
 	xchgQueue        queue.Queue
 	xchgs            *xchgManager
 	readMsgs         queue.Queue
@@ -70,12 +70,12 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	}
 
 	r := &baseResolver{
-		done:      make(chan struct{}, 2),
-		rlimit:    ratelimit.New(perSec, ratelimit.WithoutSlack),
-		measure:   make(chan time.Time, 10),
-		xchgQueue: queue.NewQueue(),
-		xchgs:     newXchgManager(),
-		readMsgs:  queue.NewQueue(),
+		done:        make(chan struct{}, 2),
+		rlimit:      ratelimit.New(perSec, ratelimit.WithoutSlack),
+		sampleQueue: queue.NewQueue(),
+		xchgQueue:   queue.NewQueue(),
+		xchgs:       newXchgManager(),
+		readMsgs:    queue.NewQueue(),
 		wildcardChannels: &wildcardChans{
 			WildcardReq:     queue.NewQueue(),
 			IPsAcrossLevels: make(chan *ipsAcrossLevels, 10),
@@ -90,6 +90,7 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	go r.manageWildcards(r.wildcardChannels)
 	go r.sendQueries()
 	go r.responses()
+	go r.rateAdjustments()
 	go r.timeouts()
 	go r.handleReads()
 	return r
@@ -219,9 +220,6 @@ func (r *baseResolver) queueQuery(ctx context.Context, msg *dns.Msg, p int) *res
 }
 
 func (r *baseResolver) sendQueries() {
-	var last time.Time
-	var measuring bool
-
 	for {
 		select {
 		case <-r.done:
@@ -229,17 +227,6 @@ func (r *baseResolver) sendQueries() {
 		case <-r.xchgQueue.Signal():
 			if element, ok := r.xchgQueue.Next(); ok {
 				r.rateLimiterTake()
-
-				now := time.Now()
-				if l := r.xchgQueue.Len(); !measuring && l >= minSampleSetSize {
-					r.measure <- now
-					measuring = true
-				} else if measuring && l == 0 && now.Sub(last) > maxDelayBetweenSamples {
-					r.measure <- time.Time{}
-					measuring = false
-				}
-
-				last = now
 				r.writeMessage(element.(*resolveRequest))
 			}
 		}
@@ -300,28 +287,10 @@ type readMsg struct {
 }
 
 func (r *baseResolver) responses() {
-	var responseTimes []time.Time
-	var collect, stopped, last time.Time
-
-	update := func() {
-		times := make([]time.Time, len(responseTimes))
-		copy(times, responseTimes)
-		go r.calcNewRate(times)
-		responseTimes = []time.Time{}
-		last = time.Now()
-	}
-
 	for {
 		select {
 		case <-r.done:
 			return
-		case t := <-r.measure:
-			collect = t
-			if collect.IsZero() {
-				stopped = time.Now()
-			} else {
-				update()
-			}
 		default:
 		}
 
@@ -329,19 +298,7 @@ func (r *baseResolver) responses() {
 			rtime := time.Now()
 
 			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-				var add bool
-
-				// Collect resolver response times
-				if !collect.IsZero() && req.Timestamp.After(collect) {
-					add = true
-				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
-					add = true
-				} else if len(responseTimes) > minSampleSetSize && rtime.Sub(last) > minSamplingTime {
-					update()
-				}
-				if add {
-					responseTimes = append(responseTimes, rtime)
-				}
+				r.sampleQueue.Append(rtime)
 
 				r.readMsgs.Append(&readMsg{
 					Req:  req,
@@ -349,41 +306,74 @@ func (r *baseResolver) responses() {
 				})
 			}
 		}
-
-		if now := time.Now(); now.Sub(last) > (15 * time.Second) {
-			go r.setRateLimit(r.perSec)
-			responseTimes = []time.Time{}
-			last = now
-		}
 	}
 }
 
-func (r *baseResolver) calcNewRate(times []time.Time) {
-	var last time.Time
-	var total time.Duration
+func (r *baseResolver) rateAdjustments() {
+	atMax := true
 
-	if len(times) < minSampleSetSize {
-		return
+	t := time.NewTicker(minSamplingTime)
+	defer t.Stop()
+loop:
+	for {
+		select {
+		case <-r.done:
+			break loop
+		case <-t.C:
+		}
+
+		if r.sampleQueue.Len() < minSampleSetSize {
+			if !atMax {
+				r.setRateLimit(r.perSec)
+				atMax = true
+			}
+			continue
+		}
+
+		var times []time.Time
+		r.sampleQueue.Process(func(e interface{}) {
+			if sample, ok := e.(time.Time); ok {
+				times = append(times, sample)
+			}
+		})
+
+		atMax = r.calcNewRate(times, atMax)
 	}
 
+	// Empty the queue
+	r.sampleQueue.Process(func(e interface{}) {})
+}
+
+func (r *baseResolver) calcNewRate(times []time.Time, max bool) bool {
+	var last time.Time
+	var fastest time.Duration
+
+	// Acquire the shortest time delta between response samples
 	for i, t := range times {
 		if i > 0 {
-			total += t.Sub(last)
+			if delta := t.Sub(last); delta < fastest {
+				fastest = delta
+			}
 		}
 		last = t
 	}
 
-	avg := total / time.Duration(len(times)-1)
-	if avg > time.Second {
-		avg = time.Second
+	// Check if requests should continue being sent at maximum rate
+	fastest -= time.Duration(float64(fastest) * 0.25)
+	if fastest > time.Second {
+		if !max {
+			r.setRateLimit(r.perSec)
+		}
+		return true
 	}
-	avg -= time.Duration(float64(avg) * 0.25)
 
-	persec := int(time.Second / avg)
+	// Calculate the new rate based on the samples collected
+	persec := int(time.Second / fastest)
 	if persec <= 1 {
 		persec = r.perSec
 	}
-	r.setRateLimit(persec)
+	r.setRateLimit(persec + 1)
+	return false
 }
 
 func (r *baseResolver) handleReads() {
