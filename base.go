@@ -19,7 +19,7 @@ import (
 
 const (
 	maxDelayBetweenSamples time.Duration = 250 * time.Millisecond
-	minSamplingTime        time.Duration = 2 * time.Second
+	minSamplingTime        time.Duration = 5 * time.Second
 	minSampleSetSize       int           = 5
 )
 
@@ -304,7 +304,9 @@ func (r *baseResolver) responses() {
 	var collect, stopped, last time.Time
 
 	update := func() {
-		r.calcNewRate(responseTimes)
+		times := make([]time.Time, len(responseTimes))
+		copy(times, responseTimes)
+		go r.calcNewRate(times)
 		responseTimes = []time.Time{}
 		last = time.Now()
 	}
@@ -334,7 +336,7 @@ func (r *baseResolver) responses() {
 					add = true
 				} else if collect.IsZero() && req.Timestamp.Before(stopped) {
 					add = true
-				} else if rtime.Sub(last) > minSamplingTime {
+				} else if len(responseTimes) > minSampleSetSize && rtime.Sub(last) > minSamplingTime {
 					update()
 				}
 				if add {
