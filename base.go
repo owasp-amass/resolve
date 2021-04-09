@@ -346,7 +346,7 @@ loop:
 
 func (r *baseResolver) calcNewRate(times []time.Time, max bool) bool {
 	var last time.Time
-	var fastest time.Duration
+	fastest := 5 * time.Second
 
 	// Acquire the shortest time delta between response samples
 	for i, t := range times {
