@@ -72,7 +72,7 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	r := &baseResolver{
 		done:      make(chan struct{}, 2),
 		rlimit:    ratelimit.New(perSec, ratelimit.WithoutSlack),
-		measure:   make(chan time.Time, 2),
+		measure:   make(chan time.Time, 10),
 		xchgQueue: queue.NewQueue(),
 		xchgs:     newXchgManager(),
 		readMsgs:  queue.NewQueue(),
@@ -231,7 +231,7 @@ func (r *baseResolver) sendQueries() {
 				r.rateLimiterTake()
 
 				now := time.Now()
-				if l := r.xchgQueue.Len(); !measuring && l > 0 {
+				if l := r.xchgQueue.Len(); !measuring && l >= minSampleSetSize {
 					r.measure <- now
 					measuring = true
 				} else if measuring && l == 0 && now.Sub(last) > maxDelayBetweenSamples {
@@ -348,6 +348,10 @@ func (r *baseResolver) responses() {
 					Resp: m,
 				})
 			}
+		}
+
+		if time.Now().Sub(last) > (15 * time.Second) {
+			go r.setRateLimit(r.perSec)
 		}
 	}
 }
