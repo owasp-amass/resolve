@@ -350,8 +350,10 @@ func (r *baseResolver) responses() {
 			}
 		}
 
-		if time.Now().Sub(last) > (15 * time.Second) {
+		if now := time.Now(); now.Sub(last) > (15 * time.Second) {
 			go r.setRateLimit(r.perSec)
+			responseTimes = []time.Time{}
+			last = now
 		}
 	}
 }
