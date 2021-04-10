@@ -337,14 +337,15 @@ loop:
 			}
 		})
 
-		atMax = r.calcNewRate(times, atMax)
+		r.calcNewRate(times)
+		atMax = false
 	}
 
 	// Empty the queue
 	r.sampleQueue.Process(func(e interface{}) {})
 }
 
-func (r *baseResolver) calcNewRate(times []time.Time, max bool) bool {
+func (r *baseResolver) calcNewRate(times []time.Time) {
 	var last time.Time
 	fastest := 5 * time.Second
 
@@ -358,22 +359,17 @@ func (r *baseResolver) calcNewRate(times []time.Time, max bool) bool {
 		last = t
 	}
 
-	// Check if requests should continue being sent at maximum rate
+	// Push the speed up by 25 percent to encouraage faster traffic
 	fastest -= time.Duration(float64(fastest) * 0.25)
-	if fastest > time.Second {
-		if !max {
-			r.setRateLimit(r.perSec)
-		}
-		return true
-	}
 
 	// Calculate the new rate based on the samples collected
 	persec := int(time.Second / fastest)
-	if persec <= 1 {
+	if fastest > time.Second || persec <= 1 {
+		persec = 1
+	} else if persec > r.perSec {
 		persec = r.perSec
 	}
 	r.setRateLimit(persec + 1)
-	return false
 }
 
 func (r *baseResolver) handleReads() {
