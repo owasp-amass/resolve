@@ -360,7 +360,9 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	}
 
 	// Push the speed up by 25 percent to encouraage faster traffic
-	fastest -= time.Duration(float64(fastest) * 0.25)
+	if f := fastest - time.Duration(float64(fastest)*0.25); f > 0 {
+		fastest = f
+	}
 
 	// Calculate the new rate based on the samples collected
 	persec := int(time.Second / fastest)
