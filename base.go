@@ -352,7 +352,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	// Acquire the shortest time delta between response samples
 	for i, t := range times {
 		if i > 0 {
-			if delta := t.Sub(last); delta < fastest {
+			if delta := t.Sub(last); delta > 0 && delta < fastest {
 				fastest = delta
 			}
 		}
