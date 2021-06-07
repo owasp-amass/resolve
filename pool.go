@@ -32,11 +32,15 @@ type resolverPool struct {
 
 // NewResolverPool initializes a ResolverPool that uses the provided Resolvers.
 func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolver, partnum int, logger *log.Logger) Resolver {
-	if l := len(resolvers); l == 0 {
+	l := len(resolvers)
+	if l == 0 {
 		return nil
 	}
 	if partnum <= 0 {
 		partnum = 1
+	}
+	if l < partnum {
+		partnum = l
 	}
 
 	rp := &resolverPool{
@@ -50,7 +54,7 @@ func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolve
 		log:        logger,
 	}
 
-	num := len(resolvers) / partnum
+	num := l / partnum
 	for i := 0; i < partnum; i++ {
 		start := i * num
 		end := (start + num) - 1
