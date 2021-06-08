@@ -8,6 +8,6 @@ require (
 	github.com/miekg/dns v1.1.42
 	github.com/stretchr/testify v1.7.0 // indirect
 	go.uber.org/ratelimit v0.2.0
-	golang.org/x/net v0.0.0-20210521195947-fe42d452be8f // indirect
-	golang.org/x/sys v0.0.0-20210521203332-0cec03c779c1 // indirect
+	golang.org/x/net v0.0.0-20210525063256-abc453219eb5 // indirect
+	golang.org/x/sys v0.0.0-20210603125802-9665404d3644 // indirect
 )
