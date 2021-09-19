@@ -96,6 +96,8 @@ func (r *baseResolver) wildcard(ctx context.Context, msg *dns.Msg, domain string
 			}
 
 			set := stringset.New()
+			defer set.Close()
+
 			insertRecordData(set, ExtractAnswers(msg))
 			intersectRecordData(set, w.Answers)
 			if set.Len() > 0 {
@@ -203,6 +205,8 @@ func (r *baseResolver) testIPsAcrossLevels(wildcards map[string]*wildcard, req *
 
 	l := len(labels) - base
 	records := stringset.New()
+	defer records.Close()
+
 	for i := 1; i <= l; i++ {
 		w, found := wildcards[strings.Join(labels[i:], ".")]
 		if !found || w.Answers == nil || len(w.Answers) == 0 {
@@ -226,8 +230,10 @@ func (r *baseResolver) testIPsAcrossLevels(wildcards map[string]*wildcard, req *
 
 func (r *baseResolver) wildcardTest(ctx context.Context, sub string) {
 	var retRecords bool
-	set := stringset.New()
 	var answers []*ExtractedAnswer
+
+	set := stringset.New()
+	defer set.Close()
 
 	// Query multiple times with unlikely names against this subdomain
 	for i := 0; i < numOfWildcardTests; i++ {
@@ -260,6 +266,8 @@ func (r *baseResolver) wildcardTest(ctx context.Context, sub string) {
 	}
 
 	already := stringset.New()
+	defer already.Close()
+
 	var final []*ExtractedAnswer
 	// Create the slice of answers common across all the unlikely name queries
 	for _, a := range answers {
@@ -325,8 +333,9 @@ func UnlikelyName(sub string) string {
 	return newlabel + "." + sub
 }
 
-func intersectRecordData(set stringset.Set, ans []*ExtractedAnswer) {
+func intersectRecordData(set *stringset.Set, ans []*ExtractedAnswer) {
 	records := stringset.New()
+	defer records.Close()
 
 	for _, a := range ans {
 		records.Insert(strings.Trim(a.Data, "."))
@@ -335,8 +344,9 @@ func intersectRecordData(set stringset.Set, ans []*ExtractedAnswer) {
 	set.Intersect(records)
 }
 
-func insertRecordData(set stringset.Set, ans []*ExtractedAnswer) {
+func insertRecordData(set *stringset.Set, ans []*ExtractedAnswer) {
 	records := stringset.New()
+	defer records.Close()
 
 	for _, a := range ans {
 		records.Insert(strings.Trim(a.Data, "."))

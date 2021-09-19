@@ -109,8 +109,6 @@ func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
 			value = parseTXTType(a)
 		case dns.TypeSOA:
 			value = parseSOAType(a)
-		case dns.TypeSPF:
-			value = parseSPFType(a)
 		case dns.TypeSRV:
 			value = parseSRVType(a)
 		}
@@ -222,16 +220,6 @@ func parseSOAType(rr dns.RR) string {
 
 	if t, ok := rr.(*dns.SOA); ok {
 		value = t.Ns + "," + t.Mbox
-	}
-
-	return value
-}
-
-func parseSPFType(rr dns.RR) string {
-	var value string
-
-	if t, ok := rr.(*dns.SPF); ok {
-		value = strings.Join(t.Txt, " ")
 	}
 
 	return value

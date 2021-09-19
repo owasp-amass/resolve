@@ -146,20 +146,6 @@ func TestExtractAnswers(t *testing.T) {
 	} else {
 		t.Errorf("Extracted answer for %d was empty", qtype)
 	}
-	// Test for TypeSPF messages
-	qtype = dns.TypeSPF
-	data = "v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.123 a -all"
-	m = new(dns.Msg)
-	m.SetReply(QueryMsg("caffix.net", qtype))
-	m.Answer = make([]dns.RR, 1)
-	m.Answer[0] = &dns.SPF{Hdr: dns.RR_Header{Name: m.Question[0].Name, Rrtype: qtype, Class: dns.ClassINET}, Txt: []string{data}}
-	if ans := ExtractAnswers(m); len(ans) > 0 {
-		if d := ans[0].Data; d != data {
-			t.Errorf("Extracted answer for %d was %s and %s was expected", qtype, d, data)
-		}
-	} else {
-		t.Errorf("Extracted answer for %d was empty", qtype)
-	}
 	// Test for TypeSRV messages
 	qtype = dns.TypeSRV
 	data = "srv.google.com"

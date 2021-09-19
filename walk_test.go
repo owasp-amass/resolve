@@ -125,11 +125,15 @@ func TestNsecTraversal(t *testing.T) {
 	}
 
 	set := stringset.New()
+	defer set.Close()
+
 	for _, name := range names {
 		set.Insert(name.NextDomain)
 	}
 
 	nsecSet := stringset.New(nsecLinkedList...)
+	defer nsecSet.Close()
+
 	nsecSet.Subtract(set)
 	if nsecSet.Len() != 0 {
 		t.Errorf("The NSEC traversal found %d names and failed to discover the following names: %v", set.Len(), nsecSet.Slice())
