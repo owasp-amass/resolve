@@ -3,8 +3,8 @@ module github.com/caffix/resolve
 go 1.16
 
 require (
-	github.com/caffix/queue v0.0.0-20210919184559-3d29ef765713
-	github.com/caffix/stringset v0.0.0-20210919182745-9e8f176e1408
+	github.com/caffix/queue v0.0.0-20210920180243-75020881c0a9
+	github.com/caffix/stringset v0.0.0-20210920174250-2c76b0064b37
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/dgraph-io/ristretto v0.1.0 // indirect
 	github.com/golang/glog v1.0.0 // indirect
