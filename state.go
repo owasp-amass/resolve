@@ -87,7 +87,7 @@ func (r *xchgManager) add(req *resolveRequest) error {
 
 	key := xchgKey(req.ID, req.Name)
 	if _, found := r.xchgs[key]; found {
-		return fmt.Errorf("Key %s is already in use", key)
+		return fmt.Errorf("key %s is already in use", key)
 	}
 
 	r.xchgs[key] = req
@@ -162,63 +162,4 @@ func (r *xchgManager) delete(keys []string) []*resolveRequest {
 	}
 
 	return removed
-}
-
-const (
-	minNumInAverage   int           = 10
-	maxNumInAverage   int           = 20
-	failurePercentage float64       = 0.8
-	expireDuration    time.Duration = 30 * time.Second
-)
-
-type slidingWindowEntry struct {
-	Timeout   bool
-	Timestamp time.Time
-}
-type slidingWindowTimeouts struct {
-	sync.Mutex
-	avgs map[string][]*slidingWindowEntry
-}
-
-func newSlidingWindowTimeouts() *slidingWindowTimeouts {
-	return &slidingWindowTimeouts{avgs: make(map[string][]*slidingWindowEntry)}
-}
-
-func (s *slidingWindowTimeouts) updateTimeouts(key string, timeout bool) bool {
-	s.Lock()
-	defer s.Unlock()
-
-	now := time.Now()
-	s.avgs[key] = append(s.avgs[key], &slidingWindowEntry{
-		Timeout:   timeout,
-		Timestamp: now,
-	})
-
-	l := len(s.avgs[key])
-	if l > maxNumInAverage {
-		s.avgs[key] = s.avgs[key][l-maxNumInAverage:]
-	}
-
-	var expired int
-	var timeouts float64
-	for _, v := range s.avgs[key] {
-		if now.After(v.Timestamp.Add(expireDuration)) {
-			expired++
-			continue
-		}
-		if v.Timeout {
-			timeouts++
-		}
-	}
-	s.avgs[key] = s.avgs[key][expired:]
-
-	l = len(s.avgs[key])
-	if l < minNumInAverage {
-		return false
-	}
-
-	if timeouts/float64(l) >= failurePercentage {
-		return true
-	}
-	return false
 }

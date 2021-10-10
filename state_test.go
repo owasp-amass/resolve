@@ -135,37 +135,3 @@ func TestXchgRemoveAll(t *testing.T) {
 		t.Errorf("Not all expected requests were returned by removeAll")
 	}
 }
-
-func TestSlidingWindowBelowMin(t *testing.T) {
-	timeouts := newSlidingWindowTimeouts()
-
-	for i := 0; i < minNumInAverage-1; i++ {
-		if timeouts.updateTimeouts("min", true) {
-			t.Errorf("Reported true before reaching the minimum number of samples")
-		}
-	}
-
-	if !timeouts.updateTimeouts("min", true) {
-		t.Errorf("Failed to report true after reaching the minimum number of samples")
-	}
-}
-
-func TestSlidingWindowFailurePercentage(t *testing.T) {
-	timeouts := newSlidingWindowTimeouts()
-
-	total := float64(maxNumInAverage)
-	num := total * failurePercentage
-	for i := float64(0); i < total-num; i++ {
-		timeouts.updateTimeouts("per", false)
-	}
-
-	for i := float64(0); i < num-1; i++ {
-		if timeouts.updateTimeouts("per", true) {
-			t.Errorf("Reported true before reaching the failure percentage")
-		}
-	}
-
-	if !timeouts.updateTimeouts("per", true) {
-		t.Errorf("Failed to report true after reaching the failure percentage")
-	}
-}
