@@ -96,6 +96,11 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	return r
 }
 
+// Len implements the Resolver interface.
+func (r *baseResolver) Len() int {
+	return r.xchgQueue.Len()
+}
+
 // Stop implements the Resolver interface.
 func (r *baseResolver) Stop() {
 	r.Lock()

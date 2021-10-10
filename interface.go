@@ -22,6 +22,9 @@ const (
 type Resolver interface {
 	fmt.Stringer
 
+	// Len returns the number of requests in the resolver queue.
+	Len() int
+
 	// Stop will stop the Resolver.
 	Stop()
 
