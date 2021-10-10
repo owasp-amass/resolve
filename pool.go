@@ -25,7 +25,6 @@ type resolverPool struct {
 	sfcount        int
 	cur            int
 	last           time.Time
-	waits          map[string]time.Time
 	delay          time.Duration
 	hasBeenStopped bool
 }
@@ -47,7 +46,6 @@ func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolve
 		baseline:   baseline,
 		partitions: make([][]Resolver, partnum),
 		last:       time.Now(),
-		waits:      make(map[string]time.Time),
 		delay:      delay,
 		done:       make(chan struct{}, 2),
 		log:        logger,
@@ -163,16 +161,10 @@ func (rp *resolverPool) incServfailCount() {
 }
 
 func (rp *resolverPool) numUsableResolvers() int {
-	rp.Lock()
-	defer rp.Unlock()
-
 	var num int
-	now := time.Now()
 	for _, partition := range rp.partitions {
 		for _, r := range partition {
-			t, found := rp.waits[r.String()]
-
-			if (!found || t.IsZero() || now.After(t)) && !r.Stopped() {
+			if !r.Stopped() {
 				num++
 			}
 		}
@@ -213,9 +205,7 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		}
 
 		for _, res := range part {
-			t, found := rp.waits[res.String()]
-
-			if (!found || t.IsZero() || time.Now().After(t)) && !res.Stopped() {
+			if !res.Stopped() {
 				r = res
 				break
 			}

@@ -35,13 +35,13 @@ func TestPoolQuery(t *testing.T) {
 
 	ch := make(chan string, 10)
 	for i := 0; i < 100; i++ {
-		go func(r Resolver, out chan string) {
+		go func() {
 			msg := QueryMsg("pool.net", 1)
 
 			var ip string
-			resp, err := r.Query(context.TODO(), msg, PriorityNormal, PoolRetryPolicy)
+			resp, err := pool.Query(context.TODO(), msg, PriorityNormal, PoolRetryPolicy)
 			if err != nil {
-				out <- ip
+				ch <- ip
 				return
 			}
 
@@ -49,8 +49,8 @@ func TestPoolQuery(t *testing.T) {
 				ip = ans[0].Data
 			}
 
-			out <- ip
-		}(pool, ch)
+			ch <- ip
+		}()
 	}
 
 	err = nil

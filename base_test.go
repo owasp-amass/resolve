@@ -128,12 +128,12 @@ func TestEdgeCases(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
 	if r := NewBaseResolver(addrstr, 0, nil); r != nil {
-		t.Errorf("Resolver was returned when provided an invalid number of messages per second argument")
+		t.Errorf("resolver was returned when provided an invalid number of messages per second argument")
 	}
 
 	r := NewBaseResolver(addrstr, 10, nil)
@@ -141,17 +141,17 @@ func TestEdgeCases(t *testing.T) {
 
 	for _, priority := range []int{PriorityLow - 1, PriorityCritical + 1} {
 		if _, err := r.Query(ctx, QueryMsg("google.com", 1), -1, nil); err == nil {
-			t.Errorf("Resolver was returned with an invalid priority of %d", priority)
+			t.Errorf("resolver was returned with an invalid priority of %d", priority)
 		}
 	}
 
 	cancel()
 	if _, err := r.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
-		t.Errorf("Query was successful when provided an expired context")
+		t.Errorf("query was successful when provided an expired context")
 	}
 
 	r.Stop()
 	if _, err := r.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
-		t.Errorf("Query was successful when provided a stopped Resolver")
+		t.Errorf("query was successful when provided a stopped Resolver")
 	}
 }
