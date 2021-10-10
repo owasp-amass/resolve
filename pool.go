@@ -5,8 +5,10 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"io/ioutil"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -21,10 +23,8 @@ type resolverPool struct {
 	baseline       Resolver
 	partitions     [][]Resolver
 	sfcount        int
-	curPart        int
+	cur            int
 	last           time.Time
-	curIdx         int
-	avgs           *slidingWindowTimeouts
 	waits          map[string]time.Time
 	delay          time.Duration
 	hasBeenStopped bool
@@ -47,7 +47,6 @@ func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolve
 		baseline:   baseline,
 		partitions: make([][]Resolver, partnum),
 		last:       time.Now(),
-		avgs:       newSlidingWindowTimeouts(),
 		waits:      make(map[string]time.Time),
 		delay:      delay,
 		done:       make(chan struct{}, 2),
@@ -72,6 +71,22 @@ func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolve
 	}
 
 	return rp
+}
+
+// Len implements the Resolver interface.
+func (rp *resolverPool) Len() int {
+	var total int
+	if rp.baseline != nil {
+		total += rp.baseline.Len()
+	}
+
+	for _, part := range rp.partitions {
+		for _, r := range part {
+			total += r.Len()
+		}
+	}
+
+	return total
 }
 
 // Stop implements the Resolver interface.
@@ -105,53 +120,36 @@ func (rp *resolverPool) String() string {
 	return "ResolverPool"
 }
 
-func (rp *resolverPool) nextResolver(ctx context.Context) Resolver {
-	var count int
-	var r Resolver
-
-	for {
-		if checkContext(ctx) != nil {
-			break
-		}
-
-		rp.Lock()
-		if rp.sfcount > 5 {
-			rp.nextPartition()
-		}
-
-		part := rp.curPart
-		idx := rp.curIdx
-		rp.curIdx++
-		rp.curIdx = rp.curIdx % len(rp.partitions[part])
-		r = rp.partitions[part][idx]
-		t, found := rp.waits[r.String()]
-		rp.Unlock()
-
-		if (!found || t.IsZero() || time.Now().After(t)) && !r.Stopped() {
-			break
-		}
-
-		count++
-		count = count % len(rp.partitions[part])
-		if count == 0 || count > 5 {
-			rp.Lock()
-			rp.nextPartition()
-			rp.Unlock()
-		}
-	}
-
-	return r
-}
-
 func (rp *resolverPool) nextPartition() {
 	if time.Now().Before(rp.last.Add(30 * time.Second)) {
 		return
 	}
 
-	rp.curPart++
-	rp.curPart = rp.curPart % len(rp.partitions)
+	rp.cur++
+	rp.cur = rp.cur % len(rp.partitions)
 	rp.last = time.Now()
-	rp.curIdx = 0
+
+	if len(rp.partitions[rp.cur]) == 0 {
+		rp.checkPartitions()
+	}
+}
+
+func (rp *resolverPool) checkPartitions() {
+	var parts [][]Resolver
+	plen := len(rp.partitions)
+
+	var i int
+	for _, p := range rp.partitions {
+		if len(p) > 0 {
+			parts[i] = p
+			i++
+		}
+	}
+
+	rp.partitions = parts
+	if len(parts) < plen {
+		rp.cur = 0
+	}
 }
 
 func (rp *resolverPool) incServfailCount() {
@@ -162,13 +160,6 @@ func (rp *resolverPool) incServfailCount() {
 		return
 	}
 	rp.sfcount++
-}
-
-func (rp *resolverPool) updateWait(key string, d time.Duration) {
-	rp.Lock()
-	defer rp.Unlock()
-
-	rp.waits[key] = time.Now().Add(d)
 }
 
 func (rp *resolverPool) numUsableResolvers() int {
@@ -189,6 +180,22 @@ func (rp *resolverPool) numUsableResolvers() int {
 	return num
 }
 
+func (rp *resolverPool) copyAndSort() []Resolver {
+	rp.Lock()
+	if rp.sfcount > 5 {
+		rp.nextPartition()
+	}
+
+	part := make([]Resolver, len(rp.partitions[rp.cur]))
+	_ = copy(part, rp.partitions[rp.cur])
+	rp.Unlock()
+
+	sort.Slice(part, func(i, j int) bool {
+		return part[i].Len() > part[j].Len()
+	})
+	return part
+}
+
 // Query implements the Resolver interface.
 func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, retry Retry) (*dns.Msg, error) {
 	if rp.baseline != nil && rp.numUsableResolvers() == 0 {
@@ -198,33 +205,27 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 	var err error
 	var r Resolver
 	var resp *dns.Msg
+	part := rp.copyAndSort()
 	for times := 1; !attemptsExceeded(times-1, priority); times++ {
 		err = checkContext(ctx)
 		if err != nil {
 			break
 		}
 
-		r = rp.nextResolver(ctx)
+		for _, res := range part {
+			t, found := rp.waits[res.String()]
+
+			if (!found || t.IsZero() || time.Now().After(t)) && !res.Stopped() {
+				r = res
+				break
+			}
+		}
 		if r == nil {
+			err = errors.New("failed to obtain a resolver")
 			break
 		}
 
 		resp, err = r.Query(ctx, msg, priority, nil)
-
-		var timeout bool
-		// Check if the response is considered a resolver failure to be tracked
-		if err != nil {
-			if e, ok := err.(*ResolveError); ok && e.Rcode == TimeoutRcode {
-				timeout = true
-			}
-		}
-
-		k := r.String()
-		// Pause use of the resolver if queries have failed too often
-		if rp.avgs.updateTimeouts(k, timeout) && timeout {
-			rp.updateWait(k, rp.delay)
-		}
-
 		if err == nil {
 			break
 		}

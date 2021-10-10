@@ -23,7 +23,7 @@ func TestPoolQuery(t *testing.T) {
 	defer s.Shutdown()
 
 	var res []Resolver
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 25; i++ {
 		r := NewBaseResolver(addrstr, 100, nil)
 		defer r.Stop()
 
@@ -34,14 +34,15 @@ func TestPoolQuery(t *testing.T) {
 	defer pool.Stop()
 
 	ch := make(chan string, 10)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		go func(r Resolver, out chan string) {
 			msg := QueryMsg("pool.net", 1)
 
 			var ip string
-			resp, err := r.Query(context.TODO(), msg, PriorityNormal, nil)
+			resp, err := r.Query(context.TODO(), msg, PriorityNormal, PoolRetryPolicy)
 			if err != nil {
 				out <- ip
+				return
 			}
 
 			if ans := ExtractAnswers(resp); len(ans) > 0 {
@@ -53,11 +54,11 @@ func TestPoolQuery(t *testing.T) {
 	}
 
 	err = nil
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		ip := <-ch
 
 		if ip != "192.168.1.1" {
-			err = errors.New("Incorrect address returned")
+			err = errors.New("incorrect address returned")
 		}
 	}
 
