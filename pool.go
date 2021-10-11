@@ -15,7 +15,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-const queriesPerSort int = 125
+const queriesPerSort int = 100
 
 type resolverPool struct {
 	sync.Mutex
@@ -224,12 +224,17 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
-		for i := 0; i < len(part); i++ {
-			idx := ((times - 1) + i) % len(part)
+		if plen := len(part); plen > 0 {
+			for i := 0; i < plen; i++ {
+				idx := ((times - 1) + i) % plen
+				if idx != plen-1 && part[idx].Len() > part[idx+1].Len() {
+					continue
+				}
 
-			if res := part[idx]; !res.Stopped() {
-				r = res
-				break
+				if res := part[idx]; !res.Stopped() {
+					r = res
+					break
+				}
 			}
 		}
 		if r == nil {
