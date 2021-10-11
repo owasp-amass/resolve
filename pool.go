@@ -15,6 +15,8 @@ import (
 	"github.com/miekg/dns"
 )
 
+const queriesPerSort int = 100
+
 type resolverPool struct {
 	sync.Mutex
 	done chan struct{}
@@ -22,8 +24,9 @@ type resolverPool struct {
 	log            *log.Logger
 	baseline       Resolver
 	partitions     [][]Resolver
-	sfcount        int
 	cur            int
+	sorted         []Resolver
+	queryCount     int
 	last           time.Time
 	hasBeenStopped bool
 }
@@ -44,6 +47,7 @@ func NewResolverPool(resolvers []Resolver, baseline Resolver, partnum int, logge
 	rp := &resolverPool{
 		baseline:   baseline,
 		partitions: make([][]Resolver, partnum),
+		queryCount: queriesPerSort,
 		last:       time.Now(),
 		done:       make(chan struct{}, 2),
 		log:        logger,
@@ -117,6 +121,9 @@ func (rp *resolverPool) String() string {
 }
 
 func (rp *resolverPool) nextPartition() {
+	rp.Lock()
+	defer rp.Unlock()
+
 	if time.Now().Before(rp.last.Add(30 * time.Second)) {
 		return
 	}
@@ -124,6 +131,7 @@ func (rp *resolverPool) nextPartition() {
 	rp.cur++
 	rp.cur = rp.cur % len(rp.partitions)
 	rp.last = time.Now()
+	rp.queryCount = queriesPerSort
 
 	if len(rp.partitions[rp.cur]) == 0 {
 		rp.checkPartitions()
@@ -148,16 +156,6 @@ func (rp *resolverPool) checkPartitions() {
 	}
 }
 
-func (rp *resolverPool) incServfailCount() {
-	rp.Lock()
-	defer rp.Unlock()
-
-	if time.Now().Before(rp.last.Add(30 * time.Second)) {
-		return
-	}
-	rp.sfcount++
-}
-
 func (rp *resolverPool) numUsableResolvers() int {
 	var num int
 	for _, partition := range rp.partitions {
@@ -170,15 +168,29 @@ func (rp *resolverPool) numUsableResolvers() int {
 	return num
 }
 
-func (rp *resolverPool) copyAndSort() []Resolver {
+func (rp *resolverPool) getSortedPartition() []Resolver {
 	rp.Lock()
-	if rp.sfcount > 5 {
-		rp.nextPartition()
-	}
+	defer rp.Unlock()
 
+	if rp.resort() {
+		rp.sorted = rp.copyAndSort()
+	}
+	return rp.sorted
+}
+
+func (rp *resolverPool) resort() bool {
+	rp.queryCount++
+
+	result := rp.queryCount >= queriesPerSort
+	if result {
+		rp.queryCount = 0
+	}
+	return result
+}
+
+func (rp *resolverPool) copyAndSort() []Resolver {
 	part := make([]Resolver, len(rp.partitions[rp.cur]))
 	_ = copy(part, rp.partitions[rp.cur])
-	rp.Unlock()
 
 	sort.Slice(part, func(i, j int) bool {
 		return part[i].Len() > part[j].Len()
@@ -192,10 +204,12 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		return rp.baseline.Query(ctx, msg, priority, retry)
 	}
 
+	rp.nextPartition()
+
 	var err error
 	var r Resolver
 	var resp *dns.Msg
-	part := rp.copyAndSort()
+	part := rp.getSortedPartition()
 	for times := 1; !attemptsExceeded(times-1, priority); times++ {
 		err = checkContext(ctx)
 		if err != nil {
@@ -220,9 +234,6 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		}
 		// Timeouts and resolver errors can cause retries without executing the callback
 		if e, ok := err.(*ResolveError); ok && (e.Rcode == TimeoutRcode || e.Rcode == ResolverErrRcode) {
-			continue
-		} else if ok && e.Rcode == dns.RcodeServerFailure {
-			rp.incServfailCount()
 			continue
 		}
 
