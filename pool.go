@@ -8,14 +8,12 @@ import (
 	"errors"
 	"io/ioutil"
 	"log"
-	"sort"
+	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 )
-
-const queriesPerSort int = 100
 
 type resolverPool struct {
 	sync.Mutex
@@ -25,8 +23,6 @@ type resolverPool struct {
 	baseline       Resolver
 	partitions     [][]Resolver
 	cur            int
-	sorted         []Resolver
-	queryCount     int
 	last           time.Time
 	hasBeenStopped bool
 }
@@ -47,7 +43,6 @@ func NewResolverPool(resolvers []Resolver, baseline Resolver, partnum int, logge
 	rp := &resolverPool{
 		baseline:   baseline,
 		partitions: make([][]Resolver, partnum),
-		queryCount: queriesPerSort,
 		last:       time.Now(),
 		done:       make(chan struct{}, 2),
 		log:        logger,
@@ -120,22 +115,22 @@ func (rp *resolverPool) String() string {
 	return "ResolverPool"
 }
 
-func (rp *resolverPool) nextPartition() {
+func (rp *resolverPool) nextPartition() int {
 	rp.Lock()
 	defer rp.Unlock()
 
 	if time.Now().Before(rp.last.Add(30 * time.Second)) {
-		return
+		return rp.cur
 	}
 
 	rp.cur++
 	rp.cur = rp.cur % len(rp.partitions)
 	rp.last = time.Now()
-	rp.queryCount = queriesPerSort
 
 	if len(rp.partitions[rp.cur]) == 0 {
 		rp.checkPartitions()
 	}
+	return rp.cur
 }
 
 func (rp *resolverPool) checkPartitions() {
@@ -168,73 +163,33 @@ func (rp *resolverPool) numUsableResolvers() int {
 	return num
 }
 
-func (rp *resolverPool) getSortedPartition() []Resolver {
-	rp.Lock()
-	defer rp.Unlock()
-
-	if rp.resort() {
-		rp.sorted = rp.copyAndSort()
-	}
-	return rp.sorted
-}
-
-func (rp *resolverPool) resort() bool {
-	result := rp.queryCount >= queriesPerSort
-	if result {
-		rp.queryCount = 0
-	}
-	return result
-}
-
-func (rp *resolverPool) incQueryCount() {
-	rp.Lock()
-	defer rp.Unlock()
-
-	rp.queryCount++
-}
-
-func (rp *resolverPool) copyAndSort() []Resolver {
-	var part []Resolver
-	for _, r := range rp.partitions[rp.cur] {
-		if !r.Stopped() {
-			part = append(part, r)
-		}
-	}
-
-	sort.Slice(part, func(i, j int) bool {
-		return part[i].Len() < part[j].Len()
-	})
-	return part
-}
-
 // Query implements the Resolver interface.
 func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, retry Retry) (*dns.Msg, error) {
 	if rp.baseline != nil && rp.numUsableResolvers() == 0 {
 		return rp.baseline.Query(ctx, msg, priority, retry)
 	}
 
+	cur := rp.nextPartition()
+	plen := len(rp.partitions[cur])
+
 	var err error
 	var r Resolver
 	var resp *dns.Msg
-	rp.nextPartition()
-	part := rp.getSortedPartition()
 	for times := 1; !attemptsExceeded(times-1, priority); times++ {
 		err = checkContext(ctx)
 		if err != nil {
 			break
 		}
+		// Random selection plus search for the resolver with shortest queue
+		for i, j, k := 0, 0, rand.Intn(plen); i < plen && j < 10; i, k = i+1, (k+1)%plen {
+			res := rp.partitions[cur][k]
+			if res.Stopped() {
+				continue
+			}
 
-		if plen := len(part); plen > 0 {
-			for i := 0; i < plen; i++ {
-				idx := ((times - 1) + i) % plen
-				if idx != plen-1 && part[idx].Len() > part[idx+1].Len() {
-					continue
-				}
-
-				if res := part[idx]; !res.Stopped() {
-					r = res
-					break
-				}
+			j++
+			if r == nil || res.Len() < r.Len() {
+				r = res
 			}
 		}
 		if r == nil {
@@ -242,7 +197,6 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
-		rp.incQueryCount()
 		resp, err = r.Query(ctx, msg, priority, nil)
 		if err == nil {
 			break
