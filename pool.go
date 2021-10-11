@@ -179,13 +179,19 @@ func (rp *resolverPool) getSortedPartition() []Resolver {
 }
 
 func (rp *resolverPool) resort() bool {
-	rp.queryCount++
-
 	result := rp.queryCount >= queriesPerSort
 	if result {
 		rp.queryCount = 0
 	}
 	return result
+}
+
+func (rp *resolverPool) getQueryCount() int {
+	rp.Lock()
+	defer rp.Unlock()
+
+	rp.queryCount++
+	return rp.queryCount
 }
 
 func (rp *resolverPool) copyAndSort() []Resolver {
@@ -216,7 +222,7 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
-		i := times % len(part)
+		i := rp.getQueryCount() % len(part)
 		for _, res := range part[i:] {
 			if !res.Stopped() {
 				r = res
