@@ -15,7 +15,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-const queriesPerSort int = 100
+const queriesPerSort int = 125
 
 type resolverPool struct {
 	sync.Mutex
@@ -186,20 +186,23 @@ func (rp *resolverPool) resort() bool {
 	return result
 }
 
-func (rp *resolverPool) getQueryCount() int {
+func (rp *resolverPool) incQueryCount() {
 	rp.Lock()
 	defer rp.Unlock()
 
 	rp.queryCount++
-	return rp.queryCount
 }
 
 func (rp *resolverPool) copyAndSort() []Resolver {
-	part := make([]Resolver, len(rp.partitions[rp.cur]))
-	_ = copy(part, rp.partitions[rp.cur])
+	var part []Resolver
+	for _, r := range rp.partitions[rp.cur] {
+		if !r.Stopped() {
+			part = append(part, r)
+		}
+	}
 
 	sort.Slice(part, func(i, j int) bool {
-		return part[i].Len() > part[j].Len()
+		return part[i].Len() < part[j].Len()
 	})
 	return part
 }
@@ -210,11 +213,10 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		return rp.baseline.Query(ctx, msg, priority, retry)
 	}
 
-	rp.nextPartition()
-
 	var err error
 	var r Resolver
 	var resp *dns.Msg
+	rp.nextPartition()
 	part := rp.getSortedPartition()
 	for times := 1; !attemptsExceeded(times-1, priority); times++ {
 		err = checkContext(ctx)
@@ -222,9 +224,10 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
-		i := rp.getQueryCount() % len(part)
-		for _, res := range part[i:] {
-			if !res.Stopped() {
+		for i := 0; i < len(part); i++ {
+			idx := ((times - 1) + i) % len(part)
+
+			if res := part[idx]; !res.Stopped() {
 				r = res
 				break
 			}
@@ -234,6 +237,7 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
+		rp.incQueryCount()
 		resp, err = r.Query(ctx, msg, priority, nil)
 		if err == nil {
 			break
@@ -242,7 +246,6 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		if e, ok := err.(*ResolveError); ok && (e.Rcode == TimeoutRcode || e.Rcode == ResolverErrRcode) {
 			continue
 		}
-
 		if retry == nil || !retry(times, priority, resp) {
 			break
 		}
@@ -256,7 +259,6 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			r.Stop()
 		}
 	}
-
 	return resp, err
 }
 
