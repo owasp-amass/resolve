@@ -25,12 +25,11 @@ type resolverPool struct {
 	sfcount        int
 	cur            int
 	last           time.Time
-	delay          time.Duration
 	hasBeenStopped bool
 }
 
 // NewResolverPool initializes a ResolverPool that uses the provided Resolvers.
-func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolver, partnum int, logger *log.Logger) Resolver {
+func NewResolverPool(resolvers []Resolver, baseline Resolver, partnum int, logger *log.Logger) Resolver {
 	l := len(resolvers)
 	if l == 0 {
 		return nil
@@ -46,7 +45,6 @@ func NewResolverPool(resolvers []Resolver, delay time.Duration, baseline Resolve
 		baseline:   baseline,
 		partitions: make([][]Resolver, partnum),
 		last:       time.Now(),
-		delay:      delay,
 		done:       make(chan struct{}, 2),
 		log:        logger,
 	}
@@ -204,7 +202,8 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 
-		for _, res := range part {
+		i := times % len(part)
+		for _, res := range part[i:] {
 			if !res.Stopped() {
 				r = res
 				break

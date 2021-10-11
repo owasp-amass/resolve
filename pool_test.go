@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/miekg/dns"
 )
@@ -18,7 +17,7 @@ func TestPoolQuery(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
@@ -30,11 +29,11 @@ func TestPoolQuery(t *testing.T) {
 		res = append(res, r)
 	}
 
-	pool := NewResolverPool(res, time.Second, nil, 0, nil)
+	pool := NewResolverPool(res, nil, 0, nil)
 	defer pool.Stop()
 
 	ch := make(chan string, 10)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		go func() {
 			msg := QueryMsg("pool.net", 1)
 
@@ -48,13 +47,12 @@ func TestPoolQuery(t *testing.T) {
 			if ans := ExtractAnswers(resp); len(ans) > 0 {
 				ip = ans[0].Data
 			}
-
 			ch <- ip
 		}()
 	}
 
 	err = nil
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		ip := <-ch
 
 		if ip != "192.168.1.1" {
@@ -73,12 +71,12 @@ func TestPoolEdgeCases(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
-	if pool := NewResolverPool(nil, time.Second, nil, 1, nil); pool != nil {
-		t.Errorf("Pool was returned when provided an empty list of Resolvers")
+	if pool := NewResolverPool(nil, nil, 1, nil); pool != nil {
+		t.Errorf("pool was returned when provided an empty list of Resolvers")
 	}
 
 	var res []Resolver
@@ -90,31 +88,31 @@ func TestPoolEdgeCases(t *testing.T) {
 	}
 
 	baseline := NewBaseResolver(addrstr, 100, nil)
-	pool := NewResolverPool(res, time.Second, baseline, 3, nil)
+	pool := NewResolverPool(res, baseline, 3, nil)
 
 	if pool.Stopped() {
-		t.Errorf("Pool returned an unexpected Stopped status")
+		t.Errorf("pool returned an unexpected Stopped status")
 	}
 
 	pstr := "ResolverPool"
 	if str := pool.String(); str != pstr {
-		t.Errorf("Pool returned %s instead of the expected %s", str, pstr)
+		t.Errorf("pool returned %s instead of the expected %s", str, pstr)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if resp, err := pool.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
 		if wtype := pool.WildcardType(ctx, resp, "google.com"); wtype != WildcardTypeStatic {
-			t.Errorf("Pool returned an inaccurate wildcard detection status: %d", wtype)
+			t.Errorf("pool returned an inaccurate wildcard detection status: %d", wtype)
 		}
 	}
 
 	cancel()
 	if _, err := pool.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
-		t.Errorf("Query was successful when provided an expired context")
+		t.Errorf("query was successful when provided an expired context")
 	}
 
 	pool.Stop()
 	if !pool.Stopped() {
-		t.Errorf("Pool not stopped after being requested")
+		t.Errorf("pool not stopped after being requested")
 	}
 }

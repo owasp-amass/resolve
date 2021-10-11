@@ -18,13 +18,13 @@ func TestStopped(t *testing.T) {
 
 	// The resolver should not be considered stopped
 	if r.Stopped() {
-		t.Errorf("Resolver %s should not be considered stopped", r)
+		t.Errorf("resolver %s should not be considered stopped", r)
 	}
 
 	r.Stop()
 	// The resolver should be considered stopped
 	if !r.Stopped() {
-		t.Errorf("Resolver %s should be stopped", r)
+		t.Errorf("resolver %s should be stopped", r)
 	}
 }
 
@@ -34,7 +34,7 @@ func TestQuery(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
@@ -44,11 +44,11 @@ func TestQuery(t *testing.T) {
 	msg := QueryMsg("caffix.net", 1)
 	resp, err := r.Query(context.TODO(), msg, PriorityNormal, nil)
 	if err != nil {
-		t.Errorf("The type A query on resolver %s failed: %v", r, err)
+		t.Errorf("the type A query on resolver %s failed: %v", r, err)
 	}
 
 	if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
-		t.Errorf("The query did not return the expected IP address")
+		t.Errorf("the query did not return the expected IP address")
 	}
 }
 
@@ -58,7 +58,7 @@ func TestQueryTimeout(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
@@ -68,10 +68,10 @@ func TestQueryTimeout(t *testing.T) {
 	msg := QueryMsg("timeout.org", 1)
 	_, err = r.Query(context.TODO(), msg, PriorityNormal, nil)
 	if err == nil {
-		t.Errorf("The query did not fail as expected")
+		t.Errorf("the query did not fail as expected")
 	}
 	if e, ok := err.(*ResolveError); ok && e.Rcode != TimeoutRcode {
-		t.Errorf("The query did not return the correct error code")
+		t.Errorf("the query did not return the correct error code")
 	}
 }
 

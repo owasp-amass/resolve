@@ -6,7 +6,6 @@ package resolve
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/miekg/dns"
 )
@@ -17,7 +16,7 @@ func TestRetryQuery(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
@@ -37,7 +36,7 @@ func TestRetryQuery(t *testing.T) {
 
 		return retry
 	}); err == nil || count != max {
-		t.Errorf("The number of retries is %d instead of %d", count, max)
+		t.Errorf("the number of retries is %d instead of %d", count, max)
 	}
 }
 
@@ -47,7 +46,7 @@ func TestDefaultRetryPolicy(t *testing.T) {
 
 	s, addrstr, _, err := runLocalUDPServer(":0")
 	if err != nil {
-		t.Fatalf("Unable to run test server: %v", err)
+		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer s.Shutdown()
 
@@ -59,7 +58,7 @@ func TestDefaultRetryPolicy(t *testing.T) {
 		res = append(res, r)
 	}
 
-	pool := NewResolverPool(res, time.Second, nil, 1, nil)
+	pool := NewResolverPool(res, nil, 1, nil)
 	defer pool.Stop()
 
 	priorities := []int{PriorityLow, PriorityNormal, PriorityHigh, PriorityCritical}
@@ -73,7 +72,7 @@ func TestDefaultRetryPolicy(t *testing.T) {
 			count++
 			return PoolRetryPolicy(times, priority, m)
 		}); err == nil || count != att {
-			t.Errorf("The number of retries is %d instead of %d", count, att)
+			t.Errorf("the number of retries is %d instead of %d", count, att)
 		}
 	}
 }

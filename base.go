@@ -18,9 +18,8 @@ import (
 )
 
 const (
-	maxDelayBetweenSamples time.Duration = 250 * time.Millisecond
-	minSamplingTime        time.Duration = 5 * time.Second
-	minSampleSetSize       int           = 5
+	minSamplingTime  time.Duration = 5 * time.Second
+	minSampleSetSize int           = 5
 )
 
 type baseResolver struct {
@@ -145,7 +144,7 @@ func (r *baseResolver) Query(ctx context.Context, msg *dns.Msg, priority int, re
 	if priority != PriorityCritical && priority != PriorityHigh &&
 		priority != PriorityNormal && priority != PriorityLow {
 		return nil, &ResolveError{
-			Err:   fmt.Sprintf("Resolver: Invalid priority parameter: %d", priority),
+			Err:   fmt.Sprintf("Resolver: invalid priority parameter: %d", priority),
 			Rcode: ResolverErrRcode,
 		}
 	}
@@ -209,7 +208,7 @@ func (r *baseResolver) queueQuery(ctx context.Context, msg *dns.Msg, p int) *res
 	}
 
 	if err := r.xchgs.add(req); err != nil {
-		estr := fmt.Sprintf("Failed to obtain a valid message identifier: %v", err)
+		estr := fmt.Sprintf("failed to obtain a valid message identifier: %v", err)
 		return makeResolveResult(nil, true, estr, ResolverErrRcode)
 	}
 	r.xchgQueue.AppendPriority(req, priority)
@@ -240,7 +239,7 @@ func (r *baseResolver) sendQueries() {
 
 func (r *baseResolver) writeMessage(req *resolveRequest) {
 	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		estr := fmt.Sprintf("Failed to set the write deadline: %v", err)
+		estr := fmt.Sprintf("failed to set the write deadline: %v", err)
 
 		r.xchgs.remove(req.ID, req.Name)
 		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
@@ -248,7 +247,7 @@ func (r *baseResolver) writeMessage(req *resolveRequest) {
 	}
 
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
-		estr := fmt.Sprintf("Failed to write the query msg: %v", err)
+		estr := fmt.Sprintf("failed to write the query msg: %v", err)
 
 		r.xchgs.remove(req.ID, req.Name)
 		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
@@ -270,7 +269,7 @@ loop:
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
 				if req.Msg != nil {
-					estr := fmt.Sprintf("Query on resolver %s, for %s type %d timed out",
+					estr := fmt.Sprintf("query on resolver %s, for %s type %d timed out",
 						r.address, req.Name, req.Qtype)
 					r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
 				}
@@ -280,7 +279,7 @@ loop:
 	// Drains the xchgs of all messages and allows callers to return
 	for _, req := range r.xchgs.removeAll() {
 		if req.Msg != nil {
-			estr := fmt.Sprintf("Resolver %s has stopped", r.address)
+			estr := fmt.Sprintf("resolver %s has stopped", r.address)
 			r.returnRequest(req, makeResolveResult(nil, false, estr, ResolverErrRcode))
 		}
 	}
@@ -412,7 +411,7 @@ func (r *baseResolver) processMessage(m *dns.Msg, req *resolveRequest) {
 			}
 		}
 
-		estr := fmt.Sprintf("Query on resolver %s, for %s type %d returned error %s",
+		estr := fmt.Sprintf("query on resolver %s, for %s type %d returned error %s",
 			r.address, req.Name, req.Qtype, dns.RcodeToString[m.Rcode])
 		r.returnRequest(req, makeResolveResult(m, again, estr, m.Rcode))
 		return
@@ -438,7 +437,7 @@ func (r *baseResolver) tcpExchange(req *resolveRequest) {
 
 	m, _, err := client.Exchange(req.Msg, r.address)
 	if err != nil {
-		estr := fmt.Sprintf("Failed to perform the exchange via TCP to %s: %v", r.address, err)
+		estr := fmt.Sprintf("failed to perform the exchange via TCP to %s: %v", r.address, err)
 		r.returnRequest(req, makeResolveResult(nil, true, estr, ResolverErrRcode))
 		return
 	}
