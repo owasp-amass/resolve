@@ -37,6 +37,7 @@ type baseResolver struct {
 	address          string
 	log              *log.Logger
 	perSec           int
+	origPerSec       int
 	conn             *dns.Conn
 }
 
@@ -80,10 +81,11 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 			IPsAcrossLevels: make(chan *ipsAcrossLevels, 10),
 			TestResult:      make(chan *testResult, 10),
 		},
-		address: addr,
-		log:     logger,
-		perSec:  perSec,
-		conn:    conn,
+		address:    addr,
+		log:        logger,
+		perSec:     perSec,
+		origPerSec: perSec,
+		conn:       conn,
 	}
 
 	go r.manageWildcards(r.wildcardChannels)
@@ -328,7 +330,7 @@ loop:
 
 		if r.sampleQueue.Len() < minSampleSetSize {
 			if !atMax {
-				r.setRateLimit(r.perSec)
+				r.setRateLimit(r.origPerSec)
 				atMax = true
 			}
 			continue
