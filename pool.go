@@ -203,6 +203,10 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		if err == nil {
 			break
 		}
+		// Timeouts and resolver errors can cause retries without executing the callback
+		if e, ok := err.(*ResolveError); ok && (e.Rcode == TimeoutRcode || e.Rcode == ResolverErrRcode) {
+			continue
+		}
 		if retry == nil || !retry(times, priority, resp) {
 			break
 		}
