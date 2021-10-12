@@ -15,10 +15,10 @@ const TimeoutRcode = 101
 
 // The priority levels for Resolver DNS queries.
 const (
-	AttemptsPriorityLow      int = 50
-	AttemptsPriorityNormal   int = 100
-	AttemptsPriorityHigh     int = 250
-	AttemptsPriorityCritical int = 500
+	AttemptsPriorityLow      int = 5
+	AttemptsPriorityNormal   int = 10
+	AttemptsPriorityHigh     int = 25
+	AttemptsPriorityCritical int = 50
 )
 
 // Retry is the definition for the callbacks used in the Resolver interface.
