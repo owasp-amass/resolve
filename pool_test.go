@@ -23,7 +23,7 @@ func TestPoolQuery(t *testing.T) {
 
 	var res []Resolver
 	for i := 0; i < 25; i++ {
-		r := NewBaseResolver(addrstr, 10, nil)
+		r := NewBaseResolver(addrstr, 5, nil)
 		defer r.Stop()
 
 		res = append(res, r)
