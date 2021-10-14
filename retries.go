@@ -34,6 +34,7 @@ var RetryCodes = []int{
 var PoolRetryCodes = []int{
 	TimeoutRcode,
 	ResolverErrRcode,
+	dns.RcodeFormatError,
 	dns.RcodeRefused,
 	dns.RcodeServerFailure,
 	dns.RcodeNotImplemented,
