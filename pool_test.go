@@ -19,11 +19,11 @@ func TestPoolQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	var res []Resolver
 	for i := 0; i < 25; i++ {
-		r := NewBaseResolver(addrstr, 5, nil)
+		r := NewBaseResolver(addrstr, 10, nil)
 		defer r.Stop()
 
 		res = append(res, r)
@@ -32,9 +32,16 @@ func TestPoolQuery(t *testing.T) {
 	pool := NewResolverPool(res, nil, 0, nil)
 	defer pool.Stop()
 
+	tokens := make(chan struct{}, 50)
+	for i := 0; i < 50; i++ {
+		tokens <- struct{}{}
+	}
+
 	ch := make(chan string, 10)
 	for i := 0; i < 1000; i++ {
 		go func() {
+			<-tokens
+			defer func() { tokens <- struct{}{} }()
 			msg := QueryMsg("pool.net", 1)
 
 			var ip string
@@ -73,7 +80,7 @@ func TestPoolEdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	if pool := NewResolverPool(nil, nil, 1, nil); pool != nil {
 		t.Errorf("pool was returned when provided an empty list of Resolvers")

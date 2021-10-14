@@ -20,7 +20,7 @@ func TestWildcardType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 100, nil)
 	defer r.Stop()
@@ -75,7 +75,7 @@ func wildcardHandler(w dns.ResponseWriter, req *dns.Msg) {
 
 	if addr == "" {
 		m.Rcode = dns.RcodeNameError
-		w.WriteMsg(m)
+		_ = w.WriteMsg(m)
 		return
 	}
 
@@ -89,5 +89,5 @@ func wildcardHandler(w dns.ResponseWriter, req *dns.Msg) {
 		},
 		A: net.ParseIP(addr),
 	}
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }

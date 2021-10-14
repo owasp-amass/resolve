@@ -18,7 +18,7 @@ func TestFirstProperSubdomain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 10, nil)
 	defer r.Stop()
@@ -39,7 +39,7 @@ func firstHandler(w dns.ResponseWriter, req *dns.Msg) {
 	if req.Question[0].Qtype != dns.TypeNS ||
 		(req.Question[0].Name != "sub.first.org." && req.Question[0].Name != "first.org.") {
 		m.Rcode = dns.RcodeNameError
-		w.WriteMsg(m)
+		_ = w.WriteMsg(m)
 		return
 	}
 
@@ -53,5 +53,5 @@ func firstHandler(w dns.ResponseWriter, req *dns.Msg) {
 		},
 		Ns: "ns.first.org.",
 	}
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }

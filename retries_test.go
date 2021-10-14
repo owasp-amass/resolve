@@ -18,7 +18,7 @@ func TestRetryQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 100, nil)
 	defer r.Stop()
@@ -48,7 +48,7 @@ func TestDefaultRetryPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	var res []Resolver
 	for i := 0; i < 10; i++ {
@@ -81,5 +81,5 @@ func retryHandler(w dns.ResponseWriter, req *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(req)
 	m.Rcode = dns.RcodeNotImplemented
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }

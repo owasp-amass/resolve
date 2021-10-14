@@ -36,7 +36,7 @@ func TestQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 10, nil)
 	defer r.Stop()
@@ -60,7 +60,7 @@ func TestQueryTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 10, nil)
 	defer r.Stop()
@@ -89,7 +89,7 @@ func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
 		},
 		A: net.ParseIP("192.168.1.1"),
 	}
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }
 
 func timeoutHandler(w dns.ResponseWriter, req *dns.Msg) {
@@ -130,7 +130,7 @@ func TestEdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	if r := NewBaseResolver(addrstr, 0, nil); r != nil {
 		t.Errorf("resolver was returned when provided an invalid number of messages per second argument")

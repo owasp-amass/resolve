@@ -111,7 +111,7 @@ func TestNsecTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
-	defer s.Shutdown()
+	defer func() { _ = s.Shutdown() }()
 
 	r := NewBaseResolver(addrstr, 100, nil)
 	defer r.Stop()
@@ -146,7 +146,7 @@ func walkHandler(w dns.ResponseWriter, req *dns.Msg) {
 
 	if req.Question[0].Qtype != dns.TypeNSEC {
 		m.Rcode = dns.RcodeNameError
-		w.WriteMsg(m)
+		_ = w.WriteMsg(m)
 		return
 	}
 
@@ -175,5 +175,5 @@ func walkHandler(w dns.ResponseWriter, req *dns.Msg) {
 		},
 		NextDomain: next,
 	}
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }

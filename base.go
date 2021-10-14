@@ -240,6 +240,12 @@ func (r *baseResolver) sendQueries() {
 }
 
 func (r *baseResolver) writeMessage(req *resolveRequest) {
+	select {
+	case <-r.done:
+		return
+	default:
+	}
+
 	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		estr := fmt.Sprintf("failed to set the write deadline: %v", err)
 
@@ -255,7 +261,6 @@ func (r *baseResolver) writeMessage(req *resolveRequest) {
 		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
 		return
 	}
-
 	// Set the timestamp for message expiration
 	r.xchgs.updateTimestamp(req.ID, req.Name)
 }
@@ -293,6 +298,8 @@ type readMsg struct {
 }
 
 func (r *baseResolver) responses() {
+	defer r.conn.Close()
+
 	for {
 		select {
 		case <-r.done:
@@ -317,7 +324,6 @@ func (r *baseResolver) responses() {
 
 func (r *baseResolver) rateAdjustments() {
 	atMax := true
-
 	t := time.NewTicker(minSamplingTime)
 	defer t.Stop()
 loop:
@@ -346,7 +352,6 @@ loop:
 		r.calcNewRate(times)
 		atMax = false
 	}
-
 	// Empty the queue
 	r.sampleQueue.Process(func(e interface{}) {})
 }
@@ -354,7 +359,6 @@ loop:
 func (r *baseResolver) calcNewRate(times []time.Time) {
 	var last time.Time
 	fastest := 5 * time.Second
-
 	// Acquire the shortest time delta between response samples
 	for i, t := range times {
 		if i > 0 {
@@ -364,12 +368,10 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 		}
 		last = t
 	}
-
 	// Push the speed up by 25 percent to encouraage faster traffic
 	if f := fastest - time.Duration(float64(fastest)*0.25); f > 0 {
 		fastest = f
 	}
-
 	// Calculate the new rate based on the samples collected
 	persec := int(time.Second / fastest)
 	if fastest > time.Second || persec <= 1 {
