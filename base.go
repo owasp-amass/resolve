@@ -327,7 +327,8 @@ loop:
 		case <-t.C:
 		}
 
-		if slen := r.sampleQueue.Len(); slen < minSampleSetSize || r.xchgs.len() < prev {
+		if r.sampleQueue.Len() < minSampleSetSize || r.xchgs.len() < prev {
+			prev = r.perSec
 			r.setRateLimit(r.perSec)
 			continue
 		}
@@ -346,7 +347,6 @@ loop:
 				break
 			}
 		}
-
 		prev = r.calcNewRate(times)
 	}
 	// Empty the queue
@@ -355,7 +355,7 @@ loop:
 
 func (r *baseResolver) calcNewRate(times []time.Time) int {
 	var last time.Time
-	fastest := 5 * time.Second
+	fastest := time.Second
 	// Acquire the shortest time delta between response samples
 	for i, t := range times {
 		if i > 0 {
@@ -365,13 +365,9 @@ func (r *baseResolver) calcNewRate(times []time.Time) int {
 		}
 		last = t
 	}
-	// Push the speed up by 25 percent to encouraage faster traffic
-	if f := fastest - time.Duration(float64(fastest)*0.25); f > 0 {
-		fastest = f
-	}
 	// Calculate the new rate based on the samples collected
-	persec := int(time.Second / fastest)
-	if fastest > time.Second || persec <= 1 {
+	persec := int(time.Second/fastest) + 1
+	if fastest > time.Second {
 		persec = 1
 	} else if persec > r.perSec {
 		persec = r.perSec
