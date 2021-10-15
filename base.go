@@ -37,7 +37,6 @@ type baseResolver struct {
 	address          string
 	log              *log.Logger
 	perSec           int
-	origPerSec       int
 	conn             *dns.Conn
 }
 
@@ -47,11 +46,9 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
 	}
-
 	if perSec <= 0 {
 		return nil
 	}
-
 	// Assign a null logger when one is not provided
 	if logger == nil {
 		logger = log.New(ioutil.Discard, "", 0)
@@ -63,7 +60,6 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 		logger.Printf("Failed to establish a UDP connection to %s : %v", addr, err)
 		return nil
 	}
-
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		logger.Printf("Failed to clear the read deadline for the UDP connection to %s : %v", addr, err)
 		return nil
@@ -81,11 +77,10 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 			IPsAcrossLevels: make(chan *ipsAcrossLevels, 10),
 			TestResult:      make(chan *testResult, 10),
 		},
-		address:    addr,
-		log:        logger,
-		perSec:     perSec,
-		origPerSec: perSec,
-		conn:       conn,
+		address: addr,
+		log:     logger,
+		perSec:  perSec,
+		conn:    conn,
 	}
 
 	go r.manageWildcards(r.wildcardChannels)
@@ -150,7 +145,6 @@ func (r *baseResolver) Query(ctx context.Context, msg *dns.Msg, priority int, re
 			Rcode: ResolverErrRcode,
 		}
 	}
-
 	if r.Stopped() {
 		return nil, &ResolveError{
 			Err:   fmt.Sprintf("Resolver: %s has been stopped", r.String()),
@@ -253,7 +247,6 @@ func (r *baseResolver) writeMessage(req *resolveRequest) {
 		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
 		return
 	}
-
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		estr := fmt.Sprintf("failed to write the query msg: %v", err)
 
@@ -323,7 +316,6 @@ func (r *baseResolver) responses() {
 }
 
 func (r *baseResolver) rateAdjustments() {
-	atMax := true
 	t := time.NewTicker(minSamplingTime)
 	defer t.Stop()
 loop:
@@ -335,10 +327,7 @@ loop:
 		}
 
 		if r.sampleQueue.Len() < minSampleSetSize {
-			if !atMax {
-				r.setRateLimit(r.origPerSec)
-				atMax = true
-			}
+			r.setRateLimit(r.perSec)
 			continue
 		}
 
@@ -350,7 +339,6 @@ loop:
 		})
 
 		r.calcNewRate(times)
-		atMax = false
 	}
 	// Empty the queue
 	r.sampleQueue.Process(func(e interface{}) {})
@@ -379,7 +367,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 	} else if persec > r.perSec {
 		persec = r.perSec
 	}
-	r.setRateLimit(persec + 1)
+	r.setRateLimit(persec)
 }
 
 func (r *baseResolver) handleReads() {
