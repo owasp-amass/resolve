@@ -316,6 +316,7 @@ func (r *baseResolver) responses() {
 }
 
 func (r *baseResolver) rateAdjustments() {
+	prev := r.perSec
 	t := time.NewTicker(minSamplingTime)
 	defer t.Stop()
 loop:
@@ -326,7 +327,7 @@ loop:
 		case <-t.C:
 		}
 
-		if r.sampleQueue.Len() < minSampleSetSize {
+		if slen := r.sampleQueue.Len(); slen < minSampleSetSize || r.xchgs.len() < prev {
 			r.setRateLimit(r.perSec)
 			continue
 		}
@@ -346,13 +347,13 @@ loop:
 			}
 		}
 
-		r.calcNewRate(times)
+		prev = r.calcNewRate(times)
 	}
 	// Empty the queue
 	r.sampleQueue.Process(func(e interface{}) {})
 }
 
-func (r *baseResolver) calcNewRate(times []time.Time) {
+func (r *baseResolver) calcNewRate(times []time.Time) int {
 	var last time.Time
 	fastest := 5 * time.Second
 	// Acquire the shortest time delta between response samples
@@ -376,6 +377,7 @@ func (r *baseResolver) calcNewRate(times []time.Time) {
 		persec = r.perSec
 	}
 	r.setRateLimit(persec)
+	return persec
 }
 
 func (r *baseResolver) handleReads() {
