@@ -226,8 +226,8 @@ func (r *baseResolver) sendQueries() {
 			return
 		case <-r.xchgQueue.Signal():
 			if element, ok := r.xchgQueue.Next(); ok {
-				r.rateLimiterTake()
 				r.writeMessage(element.(*resolveRequest))
+				r.rateLimiterTake()
 			}
 		}
 	}
@@ -331,12 +331,20 @@ loop:
 			continue
 		}
 
+		now := time.Now()
 		var times []time.Time
-		r.sampleQueue.Process(func(e interface{}) {
-			if sample, ok := e.(time.Time); ok {
-				times = append(times, sample)
+		for {
+			e, ok := r.sampleQueue.Next()
+			if !ok {
+				break
 			}
-		})
+
+			sample := e.(time.Time)
+			times = append(times, sample)
+			if sample.After(now) {
+				break
+			}
+		}
 
 		r.calcNewRate(times)
 	}
