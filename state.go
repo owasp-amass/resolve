@@ -161,11 +161,9 @@ func (r *xchgManager) delete(keys []string) []*resolveRequest {
 	var removed []*resolveRequest
 
 	for _, k := range keys {
-		req := r.xchgs[k]
-
+		removed = append(removed, r.xchgs[k])
 		r.xchgs[k] = nil
 		delete(r.xchgs, k)
-		removed = append(removed, req)
 	}
 
 	return removed

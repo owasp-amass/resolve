@@ -166,7 +166,7 @@ func (r *baseResolver) Query(ctx context.Context, msg *dns.Msg, priority int, re
 		result := r.queueQuery(ctx, msg, priority)
 		resp = result.Msg
 		err = result.Err
-		if err == nil || retry == nil {
+		if err == nil || !result.Again || retry == nil {
 			break
 		}
 
@@ -220,15 +220,27 @@ func (r *baseResolver) queueQuery(ctx context.Context, msg *dns.Msg, p int) *res
 }
 
 func (r *baseResolver) sendQueries() {
+loop:
 	for {
 		select {
 		case <-r.done:
-			return
+			break loop
 		case <-r.xchgQueue.Signal():
 			if element, ok := r.xchgQueue.Next(); ok {
 				r.writeMessage(element.(*resolveRequest))
 				r.rateLimiterTake()
 			}
+		}
+	}
+	// Drains the xchgQueue of all requests and allows callers to return
+	for {
+		e, ok := r.xchgQueue.Next()
+		if !ok {
+			break
+		}
+		if req, ok := e.(*resolveRequest); ok && req.Msg != nil {
+			estr := fmt.Sprintf("resolver %s has stopped", r.address)
+			r.returnRequest(req, makeResolveResult(nil, false, estr, ResolverErrRcode))
 		}
 	}
 }
@@ -243,15 +255,15 @@ func (r *baseResolver) writeMessage(req *resolveRequest) {
 	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		estr := fmt.Sprintf("failed to set the write deadline: %v", err)
 
-		r.xchgs.remove(req.ID, req.Name)
-		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
+		_ = r.xchgs.remove(req.ID, req.Name)
+		r.returnRequest(req, makeResolveResult(nil, true, estr, ResolverErrRcode))
 		return
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		estr := fmt.Sprintf("failed to write the query msg: %v", err)
 
-		r.xchgs.remove(req.ID, req.Name)
-		r.returnRequest(req, makeResolveResult(nil, true, estr, TimeoutRcode))
+		_ = r.xchgs.remove(req.ID, req.Name)
+		r.returnRequest(req, makeResolveResult(nil, true, estr, ResolverErrRcode))
 		return
 	}
 	// Set the timestamp for message expiration
@@ -400,18 +412,9 @@ loop:
 func (r *baseResolver) processMessage(m *dns.Msg, req *resolveRequest) {
 	// Check that the query was successful
 	if m.Rcode != dns.RcodeSuccess {
-		var again bool
-
-		for _, code := range RetryCodes {
-			if m.Rcode == code {
-				again = true
-				break
-			}
-		}
-
 		estr := fmt.Sprintf("query on resolver %s, for %s type %d returned error %s",
 			r.address, req.Name, req.Qtype, dns.RcodeToString[m.Rcode])
-		r.returnRequest(req, makeResolveResult(m, again, estr, m.Rcode))
+		r.returnRequest(req, makeResolveResult(m, true, estr, m.Rcode))
 		return
 	}
 
