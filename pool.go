@@ -212,7 +212,7 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 		}
 	}
 
-	if rp.baseline != nil && err == nil && len(resp.Answer) > 0 {
+	if rp.baseline != nil && err == nil && resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
 		// Validate findings from an untrusted resolver
 		resp, err = rp.baseline.Query(ctx, msg, priority, retry)
 		// False positives result in stopping the untrusted resolver
