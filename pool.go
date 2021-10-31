@@ -15,8 +15,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-const selectionRange int = 15
-
 type resolverPool struct {
 	sync.Mutex
 	done chan struct{}
@@ -174,6 +172,7 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 	cur := rp.nextPartition()
 	plen := len(rp.partitions[cur])
 
+	var low int
 	var err error
 	var r Resolver
 	var resp *dns.Msg
@@ -183,15 +182,17 @@ func (rp *resolverPool) Query(ctx context.Context, msg *dns.Msg, priority int, r
 			break
 		}
 		// Random selection plus search for the resolver with shortest queue
-		for i, j, k := 0, 0, rand.Intn(plen); i < plen && j < selectionRange; i, k = i+1, (k+1)%plen {
-			res := rp.partitions[cur][k]
+		for i, j := 0, rand.Intn(plen); i < plen; i, j = i+1, (j+1)%plen {
+			res := rp.partitions[cur][j]
 			if res.Stopped() {
 				continue
 			}
-
-			j++
-			if r == nil || res.Len() < r.Len() {
+			if cur := res.Len(); r == nil || cur < low {
 				r = res
+				low = cur
+			}
+			if low == 0 {
+				break
 			}
 		}
 		if r == nil {
