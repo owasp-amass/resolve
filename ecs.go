@@ -22,7 +22,7 @@ func ClientSubnetCheck(resolver string) error {
 
 	msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
 	resp, _, err := client.Exchange(msg, resolver)
-	if err != nil {
+	if err != nil || (!resp.Authoritative && !resp.RecursionAvailable) {
 		return fmt.Errorf("ClientSubnetCheck: Failed to query 'o-o.myaddr.l.google.com' using the resolver at %s: %v", resolver, err)
 	}
 
