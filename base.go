@@ -1,5 +1,6 @@
-// Copyright 2017-2021 Jeff Foley. All rights reserved.
+// Copyright © by Jeff Foley 2017-2022. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
+// SPDX-License-Identifier: Apache-2.0
 
 package resolve
 
@@ -86,7 +87,7 @@ func NewBaseResolver(addr string, perSec int, logger *log.Logger) Resolver {
 	go r.manageWildcards(r.wildcardChannels)
 	go r.sendQueries()
 	go r.responses()
-	go r.rateAdjustments()
+	//go r.rateAdjustments()
 	go r.timeouts()
 	go r.handleReads()
 	return r
