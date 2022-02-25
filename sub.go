@@ -13,7 +13,7 @@ import (
 
 // FirstProperSubdomain returns the first subdomain name using the provided name and
 // Resolver that responds successfully to a DNS query for the NS record type.
-func FirstProperSubdomain(ctx context.Context, r Resolver, name string, priority int) string {
+func FirstProperSubdomain(ctx context.Context, r *Resolvers, name string) string {
 	var domain string
 
 	// Obtain all parts of the subdomain name
@@ -23,7 +23,7 @@ func FirstProperSubdomain(ctx context.Context, r Resolver, name string, priority
 		sub := strings.Join(labels[i:], ".")
 
 		msg := QueryMsg(sub, dns.TypeNS)
-		if ns, err := r.Query(ctx, msg, priority, RetryPolicy); err == nil {
+		if ns, err := r.QueryBlocking(ctx, msg); err == nil {
 			rr := ExtractAnswers(ns)
 			if len(rr) == 0 {
 				continue

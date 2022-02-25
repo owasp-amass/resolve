@@ -13,16 +13,11 @@ import (
 )
 
 // NsecTraversal attempts to retrieve a DNS zone using NSEC-walking.
-func NsecTraversal(ctx context.Context, r Resolver, domain string, priority int) ([]*dns.NSEC, bool, error) {
-	if priority != PriorityCritical && priority != PriorityHigh && priority != PriorityLow {
-		return nil, false, &ResolveError{
-			Err:   fmt.Sprintf("Resolver: Invalid priority parameter: %d", priority),
-			Rcode: ResolverErrRcode,
-		}
-	}
-
-	if r.Stopped() {
-		return nil, true, errors.New("Resolver: The resolver has been stopped")
+func NsecTraversal(ctx context.Context, r *Resolvers, domain string) ([]*dns.NSEC, bool, error) {
+	select {
+	case <-r.done:
+		return nil, true, errors.New("resolver: The resolver has been stopped")
+	default:
 	}
 
 	found := true
@@ -32,7 +27,7 @@ func NsecTraversal(ctx context.Context, r Resolver, domain string, priority int)
 	for next := domain; found; {
 		found = false
 
-		if nsec, err := searchGap(ctx, r, next, domain, priority); err == nil {
+		if nsec, err := searchGap(ctx, r, next, domain); err == nil {
 			if _, yes := names[nsec.NextDomain]; yes {
 				break
 			}
@@ -47,13 +42,12 @@ func NsecTraversal(ctx context.Context, r Resolver, domain string, priority int)
 			break
 		}
 	}
-
 	return results, false, nil
 }
 
-func searchGap(ctx context.Context, r Resolver, name, domain string, priority int) (*dns.NSEC, error) {
-	msg, err := r.Query(ctx, WalkMsg(name, dns.TypeNSEC), priority, RetryPolicy)
-	if err != nil || msg == nil {
+func searchGap(ctx context.Context, r *Resolvers, name, domain string) (*dns.NSEC, error) {
+	msg, err := r.QueryBlocking(ctx, WalkMsg(name, dns.TypeNSEC))
+	if err != nil || len(msg.Answer) == 0 {
 		return nil, fmt.Errorf("NsecTraversal: Query for %s NSEC record failed: %v", name, err)
 	}
 
@@ -63,5 +57,5 @@ func searchGap(ctx context.Context, r Resolver, name, domain string, priority in
 		}
 	}
 
-	return nil, fmt.Errorf("NsecTraversal: Resolver %s: NSEC record not found", r.String())
+	return nil, fmt.Errorf("NsecTraversal: NSEC record not found")
 }

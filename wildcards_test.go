@@ -23,7 +23,8 @@ func TestWildcardType(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewBaseResolver(addrstr, 100, nil)
+	r := NewResolvers()
+	r.AddResolvers(100, addrstr)
 	defer r.Stop()
 
 	cases := []struct {
@@ -49,13 +50,11 @@ func TestWildcardType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		msg := QueryMsg(c.input, 1)
-
-		resp, err := r.Query(context.TODO(), msg, PriorityNormal, nil)
+		resp, err := r.QueryBlocking(context.Background(), QueryMsg(c.input, 1))
 		if err != nil {
 			t.Errorf("The query for %s failed %v", c.input, err)
 		}
-		if got := r.WildcardType(context.TODO(), resp, "domain.com"); got != c.want {
+		if got := r.WildcardType(context.Background(), resp, "domain.com"); got != c.want {
 			t.Errorf("Wildcard detection for %s returned %d instead of the expected %d", c.input, got, c.want)
 		}
 	}

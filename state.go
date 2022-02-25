@@ -17,56 +17,14 @@ import (
 // QueryTimeout is the duration until a Resolver query expires.
 var QueryTimeout = 2 * time.Second
 
-// ResolveError contains the Rcode returned during the DNS query.
-type ResolveError struct {
-	Err   string
-	Rcode int
-}
-
-func (e *ResolveError) Error() string {
-	return e.Err
-}
-
 type resolveRequest struct {
+	Ctx       context.Context
 	ID        uint16
 	Timestamp time.Time
 	Name      string
 	Qtype     uint16
 	Msg       *dns.Msg
-	Result    chan *resolveResult
-}
-
-type resolveResult struct {
-	Msg   *dns.Msg
-	Again bool
-	Err   error
-}
-
-func (r *baseResolver) returnRequest(req *resolveRequest, res *resolveResult) {
-	req.Result <- res
-}
-
-func makeResolveResult(msg *dns.Msg, again bool, err string, rcode int) *resolveResult {
-	return &resolveResult{
-		Msg:   msg,
-		Again: again,
-		Err: &ResolveError{
-			Err:   err,
-			Rcode: rcode,
-		},
-	}
-}
-
-func checkContext(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return &ResolveError{
-			Err:   "The request context was cancelled",
-			Rcode: ResolverErrRcode,
-		}
-	default:
-	}
-	return nil
+	Result    chan *dns.Msg
 }
 
 type xchgManager struct {
@@ -80,13 +38,6 @@ func newXchgManager() *xchgManager {
 
 func xchgKey(id uint16, name string) string {
 	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
-}
-
-func (r *xchgManager) len() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return len(r.xchgs)
 }
 
 func (r *xchgManager) add(req *resolveRequest) error {

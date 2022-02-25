@@ -6,6 +6,8 @@ package resolve
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -14,18 +16,52 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestPoolQuery(t *testing.T) {
+	dns.HandleFunc("pool.net.", typeAHandler)
+	defer dns.HandleRemove("pool.net.")
+
+	s, addrstr, _, err := runLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	r.AddResolvers(1000, addrstr)
+	defer r.Stop()
+
+	err = nil
+	ch := make(chan *dns.Msg, 2)
+	for i := 0; i < 1000; i++ {
+		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
+		if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+			fmt.Println("Failed")
+			err = errors.New("incorrect address returned")
+		}
+	}
+
+	if err != nil {
+		t.Errorf("%v", err)
+	}
+}
+
 func TestStopped(t *testing.T) {
-	r := NewBaseResolver("8.8.8.8", 10, nil)
+	r := NewResolvers()
+	r.AddResolvers(10, "8.8.8.8")
 
 	// The resolver should not be considered stopped
-	if r.Stopped() {
-		t.Errorf("resolver %s should not be considered stopped", r)
+	select {
+	case <-r.done:
+		t.Errorf("resolvers should not be considered stopped")
+	default:
 	}
 
 	r.Stop()
 	// The resolver should be considered stopped
-	if !r.Stopped() {
-		t.Errorf("resolver %s should be stopped", r)
+	select {
+	case <-r.done:
+	default:
+		t.Errorf("resolvers should be stopped")
 	}
 }
 
@@ -39,15 +75,57 @@ func TestQuery(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewBaseResolver(addrstr, 10, nil)
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
+	defer r.Stop()
+
+	ch := make(chan *dns.Msg, 2)
+	r.Query(context.TODO(), QueryMsg("caffix.net", 1), ch)
+	if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+		t.Errorf("the query did not return the expected IP address")
+	}
+}
+
+func TestQueryChan(t *testing.T) {
+	dns.HandleFunc("caffix.net.", typeAHandler)
+	defer dns.HandleRemove("caffix.net.")
+
+	s, addrstr, _, err := runLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	msg := QueryMsg("caffix.net", 1)
-	resp, err := r.Query(context.TODO(), msg, PriorityNormal, nil)
-	if err != nil {
-		t.Errorf("the type A query on resolver %s failed: %v", r, err)
+	ch := r.QueryChan(context.TODO(), msg)
+	if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+		t.Errorf("the query did not return the expected IP address")
 	}
+}
 
+func TestQueryBlocking(t *testing.T) {
+	dns.HandleFunc("caffix.net.", typeAHandler)
+	defer dns.HandleRemove("caffix.net.")
+
+	s, addrstr, _, err := runLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
+	defer r.Stop()
+
+	msg := QueryMsg("caffix.net", 1)
+	resp, err := r.QueryBlocking(context.TODO(), msg)
+	if err != nil {
+		t.Errorf("the type A query on resolver failed: %v", err)
+	}
 	if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
 		t.Errorf("the query did not return the expected IP address")
 	}
@@ -63,16 +141,13 @@ func TestQueryTimeout(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewBaseResolver(addrstr, 10, nil)
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
-	msg := QueryMsg("timeout.org", 1)
-	_, err = r.Query(context.TODO(), msg, PriorityNormal, nil)
-	if err == nil {
+	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
+	if err == nil && len(ExtractAnswers(resp)) != 0 {
 		t.Errorf("the query did not fail as expected")
-	}
-	if e, ok := err.(*ResolveError); ok && e.Rcode != TimeoutRcode {
-		t.Errorf("the query did not return the correct error code")
 	}
 }
 
@@ -94,7 +169,7 @@ func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
 }
 
 func timeoutHandler(w dns.ResponseWriter, req *dns.Msg) {
-	time.Sleep(2500 * time.Millisecond)
+	time.Sleep(4000 * time.Millisecond)
 	typeAHandler(w, req)
 }
 
@@ -112,7 +187,7 @@ func runLocalUDPServer(laddr string) (*dns.Server, string, chan error, error) {
 	// fin must be buffered so the goroutine below won't block
 	// forever if fin is never read from. This always happens
 	// if the channel is discarded and can happen in TestShutdownUDP.
-	fin := make(chan error, 1)
+	fin := make(chan error, 2)
 
 	go func() {
 		fin <- server.ActivateAndServe()
@@ -133,26 +208,17 @@ func TestEdgeCases(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	if r := NewBaseResolver(addrstr, 0, nil); r != nil {
-		t.Errorf("resolver was returned when provided an invalid number of messages per second argument")
-	}
-
-	r := NewBaseResolver(addrstr, 10, nil)
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	for _, priority := range []int{PriorityLow - 1, PriorityCritical + 1} {
-		if _, err := r.Query(ctx, QueryMsg("google.com", 1), -1, nil); err == nil {
-			t.Errorf("resolver was returned with an invalid priority of %d", priority)
-		}
-	}
-
 	cancel()
-	if _, err := r.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
+	if _, err := r.QueryBlocking(ctx, QueryMsg("google.com", 1)); err == nil {
 		t.Errorf("query was successful when provided an expired context")
 	}
 
 	r.Stop()
-	if _, err := r.Query(ctx, QueryMsg("google.com", 1), PriorityNormal, nil); err == nil {
+	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", 1)); err == nil && len(ExtractAnswers(resp)) > 0 {
 		t.Errorf("query was successful when provided a stopped Resolver")
 	}
 }

@@ -21,11 +21,12 @@ func TestFirstProperSubdomain(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewBaseResolver(addrstr, 10, nil)
+	r := NewResolvers()
+	r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	input := "one.two.sub.first.org"
-	sub := FirstProperSubdomain(context.TODO(), r, input, PriorityNormal)
+	sub := FirstProperSubdomain(context.TODO(), r, input)
 
 	expected := "sub.first.org"
 	if sub != expected {

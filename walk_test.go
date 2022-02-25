@@ -114,12 +114,13 @@ func TestNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewBaseResolver(addrstr, 100, nil)
+	r := NewResolvers()
+	r.AddResolvers(100, addrstr)
 	defer r.Stop()
 
-	names, rfail, err := NsecTraversal(context.TODO(), r, "walk.com", PriorityHigh)
+	names, rfail, err := NsecTraversal(context.Background(), r, "walk.com")
 	if rfail {
-		t.Errorf("Resolver %s failed during the NSEC traversal", r)
+		t.Errorf("Resolver failed during the NSEC traversal")
 	}
 	if err != nil {
 		t.Errorf("The NSEC traversal was not successful: %v", err)
