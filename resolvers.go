@@ -331,6 +331,9 @@ func (r *resolver) responses() {
 					go r.tcpExchange(req)
 					continue
 				}
+				if m.Rcode == dns.RcodeServerFailure || m.Rcode == dns.RcodeRefused {
+					r.incTimeouts(1)
+				}
 				req.Result <- m
 			}
 		}
@@ -371,7 +374,7 @@ loop:
 			r.incTimeouts(total)
 		case <-check.C:
 			if total := r.getRequests(); total > 10 {
-				if timeout := r.getTimeouts(); timeout > 0 && (float32(total)/float32(timeout) > 0.5) {
+				if timeout := r.getTimeouts(); timeout > 0 && (float32(total)/float32(timeout) > 0.8) {
 					close(r.done)
 				}
 				r.clearRequests()
@@ -390,41 +393,35 @@ loop:
 func (r *resolver) incTimeouts(num int) {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	r.timeouts += num
 }
 
 func (r *resolver) getTimeouts() int {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	return r.timeouts
 }
 
 func (r *resolver) clearTimeouts() {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	r.timeouts = 0
 }
 
 func (r *resolver) incRequests(num int) {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	r.totalReqs += num
 }
 
 func (r *resolver) getRequests() int {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	return r.totalReqs
 }
 
 func (r *resolver) clearRequests() {
 	r.tlock.Lock()
 	defer r.tlock.Unlock()
-
 	r.totalReqs = 0
 }

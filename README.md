@@ -13,25 +13,52 @@ Designed to support DNS brute-forcing with a minimal number of network connectio
 ## Installation [![Go Version](https://img.shields.io/github/go-mod/go-version/caffix/resolve)](https://golang.org/dl/)
 
 ```bash
-go get -v -u github.com/caffix/resolve
+go get -v -u github.com/caffix/resolve@master
 ```
 
 ## Usage
 
-The `Resolver` type from this package represents a DNS resolver or group of resolvers that support two primary actions: DNS queries and wildcard detection. Requests made to the same Resolver are performed asynchronously at the rate provided to the constructor of queries per second. DNS queries returning responses indicating success can then be checked for wildcards using the built-in detection.
-
 ```go
-r := resolve.NewBaseResolver("8.8.8.8", 10, nil)
+var defaultResolvers = []string{
+	"8.8.8.8",        // Google
+	"1.1.1.1",        // Cloudflare
+	"9.9.9.9",        // Quad9
+	"208.67.222.222", // Cisco OpenDNS
+	"84.200.69.80",   // DNS.WATCH
+	"64.6.64.6",      // Verisign
+	"8.26.56.26",     // Comodo Secure DNS
+	"64.6.64.6",      // Neustar DNS
+	"195.46.39.39",   // SafeDNS
+	"185.228.168.9",  // CleanBrowsing
+	"76.76.19.19",    // Alternate DNS
+	"77.88.8.1",      // Yandex.DNS
+	"94.140.14.140",  // AdGuard
+	"216.146.35.35",  // Dyn
+	"192.71.245.208", // OpenNIC
+	"38.132.106.139", // CyberGhost
+	"109.69.8.51",    // puntCAT
+	"74.82.42.42",    // Hurricane Electric
+}
+r := resolve.NewResolvers()
+r.AddResolvers(10, defaultResolvers...)
 
-msg := resolve.QueryMsg("mail.google.com", 1)
-resp, err := r.Query(context.TODO(), msg, resolve.PriorityNormal, nil)
-if err != nil {
-    return
+ctx := context.Background()
+ch := r.QueryChan(ctx, resolve.QueryMsg("mail.google.com", 1))
+
+resp := <-ch
+if resp.Rcode != dns.RcodeSuccess {
+    return errors.New("query failed")
 }
 
-if r.WildcardType(context.TODO(), resp, "google.com") != resolve.WildcardTypeNone {
-    return
+if r.WildcardType(ctx, resp, "google.com") != resolve.WildcardTypeNone {
+    return errors.New("wildcard detected")
 }
+
+if len(resp.Answer) == 0 {
+    return errors.New("zero answers returned")
+}
+
+fmt.Println(resp.Answer[0].Data)
 ```
 
 ## Licensing [![License](https://img.shields.io/github/license/caffix/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
