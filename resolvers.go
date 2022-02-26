@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/caffix/queue"
@@ -36,6 +37,9 @@ type resolver struct {
 	inc       time.Duration
 	next      time.Time
 	conn      *dns.Conn
+	tlock     sync.Mutex
+	timeouts  int
+	totalReqs int
 }
 
 // NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
@@ -215,7 +219,7 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	}
 
 	go res.responses()
-	go res.timeouts()
+	go res.processTimeouts()
 	return res
 }
 
@@ -307,30 +311,8 @@ func (r *resolver) writeNextMsg() {
 	r.xchgs.updateTimestamp(req.ID, req.Name)
 	// Update the time for the next query to be sent
 	r.next = time.Now().Add(r.inc)
-}
-
-func (r *resolver) timeouts() {
-	t := time.NewTicker(500 * time.Millisecond)
-	defer t.Stop()
-loop:
-	for {
-		select {
-		case <-r.done:
-			break loop
-		case <-t.C:
-			for _, req := range r.xchgs.removeExpired() {
-				if req.Msg != nil {
-					req.errNoResponse()
-				}
-			}
-		}
-	}
-	// Drains the xchgs of all messages and allows callers to return
-	for _, req := range r.xchgs.removeAll() {
-		if req.Msg != nil {
-			req.errNoResponse()
-		}
-	}
+	// Increment the total number of queries sent
+	r.incRequests(1)
 }
 
 func (r *resolver) responses() {
@@ -366,4 +348,83 @@ func (r *resolver) tcpExchange(req *resolveRequest) {
 		return
 	}
 	req.errNoResponse()
+}
+
+func (r *resolver) processTimeouts() {
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	check := time.NewTicker(20 * time.Second)
+	defer check.Stop()
+loop:
+	for {
+		select {
+		case <-r.done:
+			break loop
+		case <-t.C:
+			var total int
+			for _, req := range r.xchgs.removeExpired() {
+				if req.Msg != nil {
+					req.errNoResponse()
+				}
+				total++
+			}
+			r.incTimeouts(total)
+		case <-check.C:
+			if total := r.getRequests(); total > 10 {
+				if timeout := r.getTimeouts(); timeout > 0 && (float32(total)/float32(timeout) > 0.5) {
+					close(r.done)
+				}
+				r.clearRequests()
+				r.clearTimeouts()
+			}
+		}
+	}
+	// Drains the xchgs of all messages and allows callers to return
+	for _, req := range r.xchgs.removeAll() {
+		if req.Msg != nil {
+			req.errNoResponse()
+		}
+	}
+}
+
+func (r *resolver) incTimeouts(num int) {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	r.timeouts += num
+}
+
+func (r *resolver) getTimeouts() int {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	return r.timeouts
+}
+
+func (r *resolver) clearTimeouts() {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	r.timeouts = 0
+}
+
+func (r *resolver) incRequests(num int) {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	r.totalReqs += num
+}
+
+func (r *resolver) getRequests() int {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	return r.totalReqs
+}
+
+func (r *resolver) clearRequests() {
+	r.tlock.Lock()
+	defer r.tlock.Unlock()
+
+	r.totalReqs = 0
 }
