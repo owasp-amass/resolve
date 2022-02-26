@@ -41,6 +41,7 @@ var defaultResolvers = []string{
 }
 r := resolve.NewResolvers()
 r.AddResolvers(10, defaultResolvers...)
+defer r.Stop()
 
 ctx := context.Background()
 ch := r.QueryChan(ctx, resolve.QueryMsg("mail.google.com", 1))
