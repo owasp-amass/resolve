@@ -14,6 +14,8 @@ import (
 	"github.com/miekg/dns"
 )
 
+const RcodeNoResponse int = 50
+
 // QueryTimeout is the duration until a Resolver query expires.
 var QueryTimeout = 2 * time.Second
 
@@ -25,6 +27,11 @@ type resolveRequest struct {
 	Qtype     uint16
 	Msg       *dns.Msg
 	Result    chan *dns.Msg
+}
+
+func (r *resolveRequest) errNoResponse() {
+	r.Msg.Rcode = RcodeNoResponse
+	r.Result <- r.Msg
 }
 
 type xchgManager struct {

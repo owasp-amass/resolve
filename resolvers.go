@@ -104,6 +104,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 		}
 	}
 	// Failed to perform the query
+	msg.Rcode = RcodeNoResponse
 	ch <- msg
 }
 
@@ -176,7 +177,7 @@ loop:
 				break
 			}
 			if req, ok := e.(*resolveRequest); ok && req.Msg != nil {
-				req.Result <- req.Msg
+				req.errNoResponse()
 			}
 		}
 	}
@@ -236,12 +237,9 @@ func (r *Resolvers) randResolver() *resolver {
 	var low int
 	var chosen *resolver
 	rlen := len(r.list)
-	scan := maxScanLen
-	if scan > rlen {
-		scan = rlen
-	}
+	scan := min(rlen, maxScanLen)
 	// Random selection plus short scan for the resolver with shortest queue
-	for i, j := 0, rand.Intn(rlen); i < maxScanLen; i, j = i+1, (j+1)%rlen {
+	for i, j := 0, rand.Intn(rlen); i < scan; i, j = i+1, (j+1)%rlen {
 		res := r.list[j]
 		select {
 		case <-res.done:
@@ -259,9 +257,17 @@ func (r *Resolvers) randResolver() *resolver {
 	return chosen
 }
 
+func min(x, y int) int {
+	m := x
+	if y < m {
+		m = y
+	}
+	return m
+}
+
 func (r *resolver) query(req *resolveRequest) {
 	if err := r.xchgs.add(req); err != nil {
-		req.Result <- req.Msg
+		req.errNoResponse()
 		return
 	}
 	r.xchgQueue.Append(req)
@@ -282,19 +288,19 @@ func (r *resolver) writeNextMsg() {
 	req := element.(*resolveRequest)
 	select {
 	case <-req.Ctx.Done():
-		req.Result <- req.Msg
+		req.errNoResponse()
 		return
 	default:
 	}
 
 	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		_ = r.xchgs.remove(req.ID, req.Name)
-		req.Result <- req.Msg
+		req.errNoResponse()
 		return
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		_ = r.xchgs.remove(req.ID, req.Name)
-		req.Result <- req.Msg
+		req.errNoResponse()
 		return
 	}
 	// Set the timestamp for message expiration
@@ -314,7 +320,7 @@ loop:
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
 				if req.Msg != nil {
-					req.Result <- req.Msg
+					req.errNoResponse()
 				}
 			}
 		}
@@ -322,7 +328,7 @@ loop:
 	// Drains the xchgs of all messages and allows callers to return
 	for _, req := range r.xchgs.removeAll() {
 		if req.Msg != nil {
-			req.Result <- req.Msg
+			req.errNoResponse()
 		}
 	}
 }
@@ -359,5 +365,5 @@ func (r *resolver) tcpExchange(req *resolveRequest) {
 		req.Result <- m
 		return
 	}
-	req.Result <- req.Msg
+	req.errNoResponse()
 }
