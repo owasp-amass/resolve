@@ -6,7 +6,15 @@
 [![Go Report](https://goreportcard.com/badge/github.com/caffix/resolve)](https://goreportcard.com/report/github.com/caffix/resolve)
 [![CodeFactor](https://www.codefactor.io/repository/github/caffix/resolve/badge)](https://www.codefactor.io/repository/github/caffix/resolve)
 [![Codecov](https://codecov.io/gh/caffix/resolve/branch/master/graph/badge.svg)](https://codecov.io/gh/caffix/resolve)
+
 [![Follow on Twitter](https://img.shields.io/twitter/follow/jeff_foley.svg?logo=twitter)](https://twitter.com/jeff_foley)
+[![Chat](https://img.shields.io/discord/433729817918308352.svg?logo=discord&style=flat-square)](https://discord.gg/rtN8GMd)
+[![LinkedIn](https://img.shields.io/badge/-jeff%20foley-blue?style=flat-square&logo=Linkedin&logoColor=white&link=https://www.linkedin.com/in/caffix/)](https://www.linkedin.com/in/caffix/)
+[![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-%23FFDD00.svg?&style=flat&logo=buy%20me%20a%20coffee&logoColor=black)](https://www.buymeacoffee.com/caffix)
+[![PayPal](https://img.shields.io/badge/paypal-%2300457C.svg?&style=flat&logo=paypal&logoColor=white)](https://www.paypal.me/caffix)
+[![Venmo](https://img.shields.io/badge/venmo-%233D95CE.svg?&style=flat&logo=venmo&logoColor=white)](https://venmo.com/caffix)
+[![Cash App](https://img.shields.io/badge/-cash_app-00C244?style=flat-square&logo=cashapp&logoColor=fff)](https://cash.app/$caffix)
+[![GitHub Sponsors](https://img.shields.io/badge/github%20sponsors-%23EA4AAA.svg?&style=flat&logo=github%20sponsors&logoColor=white)](https://github.com/sponsors/caffix)
 
 Designed to support DNS brute-forcing with a minimal number of network connections.
 
@@ -50,13 +58,11 @@ resp := <-ch
 if resp.Rcode != dns.RcodeSuccess {
     return errors.New("query failed")
 }
-
-if r.WildcardType(ctx, resp, "google.com") != resolve.WildcardTypeNone {
-    return errors.New("wildcard detected")
-}
-
 if len(resp.Answer) == 0 {
     return errors.New("zero answers returned")
+}
+if r.WildcardDetected(ctx, resp, "google.com") {
+    return errors.New("wildcard detected")
 }
 
 fmt.Println(resp.Answer[0].Data)
