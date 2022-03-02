@@ -108,7 +108,7 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 			return true
 		}
 	}
-	return r.testIPsAcrossLevels(name, domain)
+	return r.testIPsAcrossLevels(ctx, name, domain)
 }
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
@@ -242,7 +242,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []*ExtractedAnswer {
 	ch := make(chan *dns.Msg, 2)
 	detector := r.getDetectionResolver()
-
+loop:
 	for i := 0; i < maxQueryAttempts; i++ {
 		msg := QueryMsg(name, qtype)
 		req := &resolveRequest{
@@ -255,14 +255,26 @@ func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype ui
 		}
 
 		detector.query(req)
-		if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
-			return ExtractAnswers(resp)
+		select {
+		case <-ctx.Done():
+			break loop
+		case resp := <-ch:
+			// Check if the response indicates that the name does not exist
+			if resp.Rcode == dns.RcodeNameError {
+				break loop
+			}
+			if resp.Rcode == dns.RcodeSuccess {
+				if len(resp.Answer) == 0 {
+					break loop
+				}
+				return ExtractAnswers(resp)
+			}
 		}
 	}
 	return nil
 }
 
-func (r *Resolvers) testIPsAcrossLevels(name, domain string) bool {
+func (r *Resolvers) testIPsAcrossLevels(ctx context.Context, name, domain string) bool {
 	base := len(strings.Split(domain, "."))
 	labels := strings.Split(strings.ToLower(name), ".")
 	if len(labels) <= base || (len(labels)-base) < 3 {
@@ -272,8 +284,13 @@ func (r *Resolvers) testIPsAcrossLevels(name, domain string) bool {
 	l := len(labels) - base
 	records := stringset.New()
 	defer records.Close()
-
+loop:
 	for i := 1; i <= l; i++ {
+		select {
+		case <-ctx.Done():
+			break loop
+		default:
+		}
 		w := r.getWildcard(strings.Join(labels[i:], "."))
 		if w == nil || w.Answers == nil || len(w.Answers) == 0 {
 			break
@@ -284,7 +301,6 @@ func (r *Resolvers) testIPsAcrossLevels(name, domain string) bool {
 			intersectRecordData(records, w.Answers)
 		}
 	}
-
 	return records.Len() > 0
 }
 
