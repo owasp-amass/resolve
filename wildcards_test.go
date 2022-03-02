@@ -13,7 +13,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func TestWildcardType(t *testing.T) {
+func TestWildcardDetected(t *testing.T) {
 	dns.HandleFunc("domain.com.", wildcardHandler)
 	defer dns.HandleRemove("domain.com.")
 
@@ -30,22 +30,22 @@ func TestWildcardType(t *testing.T) {
 	cases := []struct {
 		label string
 		input string
-		want  int
+		want  bool
 	}{
 		{
 			label: "valid name outside of a wildcard",
 			input: "www.domain.com",
-			want:  WildcardTypeNone,
+			want:  false,
 		},
 		{
 			label: "invalid name within a wildcard",
 			input: "jeff_foley.wildcard.domain.com",
-			want:  WildcardTypeStatic,
+			want:  true,
 		},
 		{
 			label: "valid name within a wildcard",
 			input: "ns.wildcard.domain.com",
-			want:  WildcardTypeNone,
+			want:  false,
 		},
 	}
 
@@ -54,8 +54,8 @@ func TestWildcardType(t *testing.T) {
 		if err != nil {
 			t.Errorf("The query for %s failed %v", c.input, err)
 		}
-		if got := r.WildcardType(context.Background(), resp, "domain.com"); got != c.want {
-			t.Errorf("Wildcard detection for %s returned %d instead of the expected %d", c.input, got, c.want)
+		if got := r.WildcardDetected(context.Background(), resp, "domain.com"); got != c.want {
+			t.Errorf("Wildcard detection for %s returned %t instead of the expected %t", c.input, got, c.want)
 		}
 	}
 }

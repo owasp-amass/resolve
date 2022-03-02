@@ -28,12 +28,13 @@ type Resolvers struct {
 	log       *log.Logger
 	list      []*resolver
 	rmap      map[string]int
-	wildChans *wildcardChans
+	wildcards map[string]*wildcard
 	queue     queue.Queue
 	qps       int
 	maxSet    bool
 	rate      ratelimit.Limiter
 	scan      int
+	detector  *resolver
 }
 
 type resolver struct {
@@ -50,20 +51,15 @@ type resolver struct {
 // NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
 func NewResolvers() *Resolvers {
 	r := &Resolvers{
-		done: make(chan struct{}, 2),
-		log:  log.New(ioutil.Discard, "", 0),
-		rmap: make(map[string]int),
-		wildChans: &wildcardChans{
-			WildcardReq:     queue.NewQueue(),
-			IPsAcrossLevels: make(chan *ipsAcrossLevels, 10),
-			TestResult:      make(chan *testResult, 10),
-		},
-		queue: queue.NewQueue(),
+		done:      make(chan struct{}, 2),
+		log:       log.New(ioutil.Discard, "", 0),
+		rmap:      make(map[string]int),
+		wildcards: make(map[string]*wildcard),
+		queue:     queue.NewQueue(),
 	}
 
-	go r.releaseQueries()
+	go r.enforceMaxQPS()
 	go r.sendQueries()
-	go r.manageWildcards()
 	return r
 }
 
@@ -90,20 +86,23 @@ func (r *Resolvers) QPS() int {
 
 // AddMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
 func (r *Resolvers) AddMaxQPS(qps int) {
+	r.qps = qps
 	if qps > 0 {
-		r.qps = qps
 		r.maxSet = true
 		r.rate = ratelimit.New(qps)
+		return
 	}
+	r.maxSet = false
+	r.rate = nil
 }
 
 // AddResolvers initializes and adds new resolvers to the pool of resolvers.
-func (r *Resolvers) AddResolvers(qps int, addrs ...string) {
+func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 	r.Lock()
 	defer r.Unlock()
 
 	if qps == 0 {
-		return
+		return errors.New("failed to provide a maximum number of queries per second greater than zero")
 	}
 
 	for _, addr := range addrs {
@@ -117,8 +116,9 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) {
 	}
 
 	if l := len(r.list); l > 0 {
-		r.scan = min(l-1, maxScanLen)
+		r.scan = min(l, maxScanLen)
 	}
+	return nil
 }
 
 // Stop will release resources for the resolver pool and all add resolvers.
@@ -185,7 +185,7 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 	}
 }
 
-func (r *Resolvers) releaseQueries() {
+func (r *Resolvers) enforceMaxQPS() {
 	for {
 		select {
 		case <-r.done:
@@ -279,6 +279,9 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	if qps <= 0 {
 		return nil
 	}
+	if res := r.searchList(addr); res != nil {
+		return res
+	}
 
 	c := dns.Client{UDPSize: dns.DefaultMsgSize}
 	conn, err := c.Dial(addr)
@@ -328,6 +331,15 @@ func (r *Resolvers) stopResolver(idx int) {
 	close(res.done)
 }
 
+func (r *Resolvers) searchList(addr string) *resolver {
+	for _, res := range r.list {
+		if res.address == addr {
+			return res
+		}
+	}
+	return nil
+}
+
 // Random selection plus short scan for the resolver with shortest queue
 func (r *Resolvers) randResolver() *resolver {
 	var low int
@@ -355,16 +367,11 @@ func (r *Resolvers) randList() []*resolver {
 	defer r.Unlock()
 
 	rlen := len(r.list)
-	ridx := rand.Intn(rlen)
-
-	var start, end []*resolver
-	if tidx := ridx + r.scan; tidx >= rlen {
-		start = r.list[:tidx%(rlen-1)]
-		end = r.list[ridx:rlen]
-	} else {
-		end = r.list[ridx : tidx+1]
+	var list []*resolver
+	for i, j := 0, rand.Intn(rlen); i < r.scan; i, j = i+1, (j+1)%rlen {
+		list = append(list, r.list[j])
 	}
-	return append(start, end...)
+	return list
 }
 
 func min(x, y int) int {
