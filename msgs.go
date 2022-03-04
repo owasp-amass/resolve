@@ -23,7 +23,6 @@ func RemoveLastDot(name string) string {
 // QueryMsg generates a message used for a forward DNS query.
 func QueryMsg(name string, qtype uint16) *dns.Msg {
 	m := new(dns.Msg)
-
 	m.SetQuestion(dns.Fqdn(name), qtype)
 	m.Extra = append(m.Extra, SetupOptions())
 	return m
@@ -31,8 +30,10 @@ func QueryMsg(name string, qtype uint16) *dns.Msg {
 
 // ReverseMsg generates a message used for a reverse DNS query.
 func ReverseMsg(addr string) *dns.Msg {
-	if r, err := dns.ReverseAddr(addr); err == nil {
-		return QueryMsg(r, dns.TypePTR)
+	if net.ParseIP(addr) != nil {
+		if r, err := dns.ReverseAddr(addr); err == nil {
+			return QueryMsg(r, dns.TypePTR)
+		}
 	}
 	return nil
 }
@@ -40,7 +41,6 @@ func ReverseMsg(addr string) *dns.Msg {
 // WalkMsg generates a message used for a NSEC walk query.
 func WalkMsg(name string, qtype uint16) *dns.Msg {
 	m := new(dns.Msg)
-
 	m.SetQuestion(dns.Fqdn(name), qtype)
 	m.SetEdns0(dns.DefaultMsgSize, true)
 	return m
@@ -48,21 +48,19 @@ func WalkMsg(name string, qtype uint16) *dns.Msg {
 
 // SetupOptions returns the EDNS0_SUBNET option for hiding our location.
 func SetupOptions() *dns.OPT {
-	e := &dns.EDNS0_SUBNET{
-		Code:          dns.EDNS0SUBNET,
-		Family:        1,
-		SourceNetmask: 0,
-		SourceScope:   0,
-		Address:       net.ParseIP("0.0.0.0").To4(),
-	}
-
 	return &dns.OPT{
 		Hdr: dns.RR_Header{
 			Name:   ".",
 			Rrtype: dns.TypeOPT,
 			Class:  dns.DefaultMsgSize,
 		},
-		Option: []dns.EDNS0{e},
+		Option: []dns.EDNS0{&dns.EDNS0_SUBNET{
+			Code:          dns.EDNS0SUBNET,
+			Family:        1,
+			SourceNetmask: 0,
+			SourceScope:   0,
+			Address:       net.ParseIP("0.0.0.0").To4(),
+		}},
 	}
 }
 
@@ -76,23 +74,19 @@ type ExtractedAnswer struct {
 // AnswersByType returns only the answers from the DNS Answer section matching the provided type.
 func AnswersByType(answers []*ExtractedAnswer, qtype uint16) []*ExtractedAnswer {
 	var subset []*ExtractedAnswer
-
 	for _, a := range answers {
 		if a.Type == qtype {
 			subset = append(subset, a)
 		}
 	}
-
 	return subset
 }
 
 // ExtractAnswers returns information from the DNS Answer section of the provided Msg in ExtractedAnswer type.
 func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
 	var data []*ExtractedAnswer
-
 	for _, a := range msg.Answer {
 		var value string
-
 		switch a.Header().Rrtype {
 		case dns.TypeA:
 			value = parseAType(a)
@@ -113,7 +107,6 @@ func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
 		case dns.TypeSRV:
 			value = parseSRVType(a)
 		}
-
 		if value != "" {
 			data = append(data, &ExtractedAnswer{
 				Name: strings.ToLower(RemoveLastDot(a.Header().Name)),
@@ -122,37 +115,31 @@ func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
 			})
 		}
 	}
-
 	return data
 }
 
 func parseAType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.A); ok {
 		if ip := net.ParseIP(t.A.String()); ip != nil {
 			value = ip.String()
 		}
 	}
-
 	return value
 }
 
 func parseAAAAType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.AAAA); ok {
 		if ip := net.ParseIP(t.AAAA.String()); ip != nil {
 			value = ip.String()
 		}
 	}
-
 	return value
 }
 
 func parseCNAMEType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.CNAME); ok {
 		name := RemoveLastDot(t.Target)
 
@@ -160,13 +147,11 @@ func parseCNAMEType(rr dns.RR) string {
 			value = name
 		}
 	}
-
 	return value
 }
 
 func parsePTRType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.PTR); ok {
 		name := RemoveLastDot(t.Ptr)
 
@@ -174,13 +159,11 @@ func parsePTRType(rr dns.RR) string {
 			value = name
 		}
 	}
-
 	return value
 }
 
 func parseNSType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.NS); ok {
 		name := RemoveLastDot(t.Ns)
 
@@ -188,13 +171,11 @@ func parseNSType(rr dns.RR) string {
 			value = name
 		}
 	}
-
 	return value
 }
 
 func parseMXType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.MX); ok {
 		name := RemoveLastDot(t.Mx)
 
@@ -202,33 +183,27 @@ func parseMXType(rr dns.RR) string {
 			value = name
 		}
 	}
-
 	return value
 }
 
 func parseTXTType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.TXT); ok {
 		value = strings.Join(t.Txt, " ")
 	}
-
 	return value
 }
 
 func parseSOAType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.SOA); ok {
 		value = t.Ns + "," + t.Mbox
 	}
-
 	return value
 }
 
 func parseSRVType(rr dns.RR) string {
 	var value string
-
 	if t, ok := rr.(*dns.SRV); ok {
 		name := RemoveLastDot(t.Target)
 
@@ -236,6 +211,5 @@ func parseSRVType(rr dns.RR) string {
 			value = name
 		}
 	}
-
 	return value
 }

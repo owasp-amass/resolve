@@ -13,11 +13,22 @@ import (
 	"github.com/miekg/dns"
 )
 
-func TestWildcardDetected(t *testing.T) {
-	dns.HandleFunc("domain.com.", wildcardHandler)
-	defer dns.HandleRemove("domain.com.")
+func TestSetDetectionResolver(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
 
-	s, addrstr, _, err := runLocalUDPServer(":0")
+	r.SetDetectionResolver(10, "8.8.8.8")
+	if r.detector == nil {
+		t.Errorf("failed to add the wildcard detector")
+	}
+}
+
+func TestWildcardDetected(t *testing.T) {
+	name := "domain.com."
+	dns.HandleFunc(name, wildcardHandler)
+	defer dns.HandleRemove(name)
+
+	s, addrstr, _, err := RunLocalUDPServer(":0")
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}

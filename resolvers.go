@@ -40,7 +40,7 @@ type Resolvers struct {
 type resolver struct {
 	done      chan struct{}
 	xchgQueue queue.Queue
-	xchgs     *xchgManager
+	xchgs     *xchgMgr
 	address   string
 	qps       int
 	inc       time.Duration
@@ -104,7 +104,6 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 	if qps == 0 {
 		return errors.New("failed to provide a maximum number of queries per second greater than zero")
 	}
-
 	for _, addr := range addrs {
 		if res := r.initializeResolver(addr, qps); res != nil {
 			r.rmap[res.address] = len(r.list)
@@ -114,7 +113,6 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 			}
 		}
 	}
-
 	if l := len(r.list); l > 0 {
 		r.scan = min(l, maxScanLen)
 	}
@@ -145,7 +143,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		r.queue.Append(&resolveRequest{
+		r.queue.Append(&request{
 			Ctx:    ctx,
 			ID:     msg.Id,
 			Name:   RemoveLastDot(msg.Question[0].Name),
@@ -198,7 +196,7 @@ func (r *Resolvers) enforceMaxQPS() {
 			if !ok {
 				continue
 			}
-			if req, ok := e.(*resolveRequest); ok && req.Msg != nil {
+			if req, ok := e.(*request); ok && req.Msg != nil {
 				if res := r.randResolver(); res != nil {
 					res.query(req)
 					continue
@@ -210,37 +208,15 @@ func (r *Resolvers) enforceMaxQPS() {
 }
 
 func (r *Resolvers) sendQueries() {
-loop:
 	for {
 		select {
 		case <-r.done:
-			break loop
+			return
 		default:
 		}
 
 		if !r.checkAllQueues() {
 			time.Sleep(time.Millisecond)
-		}
-	}
-
-	r.Lock()
-	list := r.list
-	r.Unlock()
-	// Drains the xchgQueue of all requests and allows callers to return
-	for _, res := range list {
-		select {
-		case <-res.done:
-			continue
-		default:
-		}
-		for {
-			e, ok := res.xchgQueue.Next()
-			if !ok {
-				break
-			}
-			if req, ok := e.(*resolveRequest); ok && req.Msg != nil {
-				req.errNoResponse()
-			}
 		}
 	}
 }
@@ -276,49 +252,39 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
 	}
-	if qps <= 0 {
-		return nil
-	}
 	if res := r.searchList(addr); res != nil {
 		return res
 	}
 
+	var res *resolver
 	c := dns.Client{UDPSize: dns.DefaultMsgSize}
-	conn, err := c.Dial(addr)
-	if err != nil {
-		r.log.Printf("Failed to establish a UDP connection to %s : %v", addr, err)
-		return nil
+	if conn, err := c.Dial(addr); err == nil {
+		_ = conn.SetDeadline(time.Time{})
+		res = &resolver{
+			done:      make(chan struct{}, 2),
+			xchgQueue: queue.NewQueue(),
+			xchgs:     newXchgMgr(),
+			address:   addr,
+			qps:       qps,
+			inc:       time.Second / time.Duration(qps),
+			next:      time.Now(),
+			conn:      conn,
+		}
+		go res.responses()
+		go res.timeouts()
 	}
-	if err := conn.SetReadDeadline(time.Time{}); err != nil {
-		r.log.Printf("Failed to clear the read deadline for the UDP connection to %s : %v", addr, err)
-		return nil
-	}
-
-	res := &resolver{
-		done:      make(chan struct{}, 2),
-		xchgQueue: queue.NewQueue(),
-		xchgs:     newXchgManager(),
-		address:   addr,
-		qps:       qps,
-		inc:       time.Second / time.Duration(qps),
-		next:      time.Now(),
-		conn:      conn,
-	}
-
-	go res.responses()
-	go res.timeouts()
 	return res
 }
 
 func (r *Resolvers) stopResolver(idx int) {
-	r.Lock()
-	defer r.Unlock()
-
-	if idx >= len(r.list) {
+	if idx >= r.Len() {
 		return
 	}
 
+	r.Lock()
 	res := r.list[idx]
+	r.Unlock()
+
 	select {
 	case <-res.done:
 		return
@@ -329,8 +295,31 @@ func (r *Resolvers) stopResolver(idx int) {
 		r.qps -= res.qps
 	}
 	close(res.done)
+	res.conn.Close()
+	// Drains the xchgQueue of all requests and allows callers to return
+	for {
+		e, ok := res.xchgQueue.Next()
+		if !ok {
+			break
+		}
+		if req, ok := e.(*request); ok && req.Msg != nil {
+			req.errNoResponse()
+		}
+	}
+	// Drains the xchgs of all messages and allows callers to return
+	for _, req := range res.xchgs.removeAll() {
+		if req.Msg != nil {
+			req.errNoResponse()
+		}
+	}
 }
 
+func (r *Resolvers) searchListWithLock(addr string) *resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.searchList(addr)
+}
 func (r *Resolvers) searchList(addr string) *resolver {
 	for _, res := range r.list {
 		if res.address == addr {
@@ -340,7 +329,7 @@ func (r *Resolvers) searchList(addr string) *resolver {
 	return nil
 }
 
-// Random selection plus short scan for the resolver with shortest queue
+// Random selection plus short scan for the resolver with shortest queue.
 func (r *Resolvers) randResolver() *resolver {
 	var low int
 	var chosen *resolver
@@ -366,10 +355,11 @@ func (r *Resolvers) randList() []*resolver {
 	r.Lock()
 	defer r.Unlock()
 
-	rlen := len(r.list)
 	var list []*resolver
-	for i, j := 0, rand.Intn(rlen); i < r.scan; i, j = i+1, (j+1)%rlen {
-		list = append(list, r.list[j])
+	if rlen := len(r.list); rlen > 0 {
+		for i, j := 0, rand.Intn(rlen); i < r.scan; i, j = i+1, (j+1)%rlen {
+			list = append(list, r.list[j])
+		}
 	}
 	return list
 }
@@ -382,7 +372,7 @@ func min(x, y int) int {
 	return m
 }
 
-func (r *resolver) query(req *resolveRequest) {
+func (r *resolver) query(req *request) {
 	if err := r.xchgs.add(req); err != nil {
 		req.errNoResponse()
 		return
@@ -402,18 +392,12 @@ func (r *resolver) writeNextMsg() {
 		return
 	}
 
-	req := element.(*resolveRequest)
+	req := element.(*request)
 	select {
 	case <-req.Ctx.Done():
 		req.errNoResponse()
 		return
 	default:
-	}
-
-	if err := r.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		_ = r.xchgs.remove(req.ID, req.Name)
-		req.errNoResponse()
-		return
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		_ = r.xchgs.remove(req.ID, req.Name)
@@ -435,7 +419,6 @@ func (r *resolver) responses() {
 			return
 		default:
 		}
-
 		if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
 			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
 				if m.Truncated {
@@ -448,12 +431,11 @@ func (r *resolver) responses() {
 	}
 }
 
-func (r *resolver) tcpExchange(req *resolveRequest) {
+func (r *resolver) tcpExchange(req *request) {
 	client := dns.Client{
 		Net:     "tcp",
 		Timeout: time.Minute,
 	}
-
 	if m, _, err := client.Exchange(req.Msg, r.address); err == nil {
 		req.Result <- m
 		return
@@ -464,23 +446,17 @@ func (r *resolver) tcpExchange(req *resolveRequest) {
 func (r *resolver) timeouts() {
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
-loop:
+
 	for {
 		select {
 		case <-r.done:
-			break loop
+			return
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
 				if req.Msg != nil {
 					req.errNoResponse()
 				}
 			}
-		}
-	}
-	// Drains the xchgs of all messages and allows callers to return
-	for _, req := range r.xchgs.removeAll() {
-		if req.Msg != nil {
-			req.errNoResponse()
 		}
 	}
 }

@@ -15,30 +15,40 @@ import (
 
 func TestXchgAddRemove(t *testing.T) {
 	name := "caffix.net"
-	xchg := newXchgManager()
+	xchg := newXchgMgr()
 	msg := QueryMsg(name, dns.TypeA)
-
-	if err := xchg.add(&resolveRequest{
+	req := &request{
 		ID:    msg.Id,
 		Name:  name,
 		Qtype: dns.TypeA,
 		Msg:   msg,
-	}); err != nil {
+	}
+	if err := xchg.add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
+	if err := xchg.add(req); err == nil {
+		t.Errorf("Failed to detect the same request added twice")
+	}
 
-	req := xchg.remove(msg.Id, msg.Question[0].Name)
-	if req == nil || req.Msg == nil || name != strings.ToLower(RemoveLastDot(req.Msg.Question[0].Name)) {
+	ret := xchg.remove(msg.Id, msg.Question[0].Name)
+	if ret == nil || ret.Msg == nil || name != strings.ToLower(RemoveLastDot(ret.Msg.Question[0].Name)) {
 		t.Errorf("Did not find and remove the message from the data structure")
+	}
+	ret = xchg.remove(msg.Id, msg.Question[0].Name)
+	if ret != nil {
+		t.Errorf("Did not return nil when attempting to remove an element for the second time")
+	}
+	if err := xchg.add(req); err != nil {
+		t.Errorf("Failed to add the request after being removed")
 	}
 }
 
 func TestXchgUpdateTimestamp(t *testing.T) {
 	name := "caffix.net"
-	xchg := newXchgManager()
+	xchg := newXchgMgr()
 	msg := QueryMsg(name, dns.TypeA)
 
-	req := &resolveRequest{
+	req := &request{
 		ID:    msg.Id,
 		Name:  name,
 		Qtype: dns.TypeA,
@@ -48,11 +58,12 @@ func TestXchgUpdateTimestamp(t *testing.T) {
 	if !req.Timestamp.IsZero() {
 		t.Errorf("Expected the new request to have a zero value timestamp")
 	}
-
 	if err := xchg.add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
 	xchg.updateTimestamp(msg.Id, name)
+	// For complete coverage
+	xchg.updateTimestamp(msg.Id, "Bad Name")
 
 	req = xchg.remove(msg.Id, msg.Question[0].Name)
 	if req == nil || req.Timestamp.IsZero() {
@@ -61,13 +72,13 @@ func TestXchgUpdateTimestamp(t *testing.T) {
 }
 
 func TestXchgRemoveExpired(t *testing.T) {
-	xchg := newXchgManager()
+	xchg := newXchgMgr()
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
 	QueryTimeout = time.Second
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
-		if err := xchg.add(&resolveRequest{
+		if err := xchg.add(&request{
 			ID:        msg.Id,
 			Name:      name,
 			Qtype:     dns.TypeA,
@@ -77,11 +88,10 @@ func TestXchgRemoveExpired(t *testing.T) {
 			t.Errorf("Failed to add the request")
 		}
 	}
-
 	// Add one request that should not be removed with the others
 	name := "vpn.caffix.net"
 	msg := QueryMsg(name, dns.TypeA)
-	if err := xchg.add(&resolveRequest{
+	if err := xchg.add(&request{
 		ID:        msg.Id,
 		Name:      name,
 		Qtype:     dns.TypeA,
@@ -90,7 +100,6 @@ func TestXchgRemoveExpired(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Failed to add the request")
 	}
-
 	if len(xchg.removeExpired()) > 0 {
 		t.Errorf("The removeExpired method returned requests too early")
 	}
@@ -102,20 +111,19 @@ func TestXchgRemoveExpired(t *testing.T) {
 	for _, req := range xchg.removeExpired() {
 		set.Remove(req.Name)
 	}
-
 	if set.Len() > 0 {
 		t.Errorf("Not all expected requests were returned by removeExpired")
 	}
 }
 
 func TestXchgRemoveAll(t *testing.T) {
-	xchg := newXchgManager()
+	xchg := newXchgMgr()
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
 	QueryTimeout = time.Second
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
-		if err := xchg.add(&resolveRequest{
+		if err := xchg.add(&request{
 			ID:    msg.Id,
 			Name:  name,
 			Qtype: dns.TypeA,
@@ -131,7 +139,6 @@ func TestXchgRemoveAll(t *testing.T) {
 	for _, req := range xchg.removeAll() {
 		set.Remove(req.Name)
 	}
-
 	if set.Len() > 0 {
 		t.Errorf("Not all expected requests were returned by removeAll")
 	}

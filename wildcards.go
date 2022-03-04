@@ -6,7 +6,6 @@ package resolve
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"net"
 	"strings"
@@ -108,28 +107,20 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 			return true
 		}
 	}
-	return r.testIPsAcrossLevels(ctx, name, domain)
+	return false
 }
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
-func (r *Resolvers) SetDetectionResolver(qps int, addr string) error {
-	if err := r.AddResolvers(qps, addr); err != nil {
-		return err
+func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
+	if err := r.AddResolvers(qps, addr); err == nil {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			// Add the default port number to the IP address
+			addr = net.JoinHostPort(addr, "53")
+		}
+		if res := r.searchListWithLock(addr); res != nil {
+			r.detector = res
+		}
 	}
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		// Add the default port number to the IP address
-		addr = net.JoinHostPort(addr, "53")
-	}
-
-	r.Lock()
-	defer r.Unlock()
-
-	if res := r.searchList(addr); res != nil {
-		r.detector = res
-		return nil
-	}
-	return errors.New("failed to add the wildcard detection resolver")
 }
 
 func (r *Resolvers) getDetectionResolver() *resolver {
@@ -160,7 +151,8 @@ func (r *Resolvers) goodDetector() bool {
 			return false
 		}
 
-		if err := r.SetDetectionResolver(d.qps, d.address); err != nil {
+		r.SetDetectionResolver(d.qps, d.address)
+		if r.detector == nil {
 			return false
 		}
 	}
@@ -185,17 +177,16 @@ func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
 	return false
 }
 
+// Determines if the provided subdomain has a DNS wildcard.
 func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*ExtractedAnswer) {
 	var detected bool
 	var answers []*ExtractedAnswer
 
 	set := stringset.New()
 	defer set.Close()
-
 	// Query multiple times with unlikely names against this subdomain
 	for i := 0; i < numOfWildcardTests; i++ {
 		var name string
-		// Generate the unlikely label / name
 		for {
 			name = UnlikelyName(sub)
 			if name != "" {
@@ -223,7 +214,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 	defer already.Close()
 
 	var final []*ExtractedAnswer
-	// Create the slice of answers common across all the unlikely name queries
+	// Create the slice of answers common across all the responses from unlikely name queries
 	for _, a := range answers {
 		a.Data = strings.Trim(a.Data, ".")
 
@@ -232,7 +223,6 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 			already.Insert(a.Data)
 		}
 	}
-	// Determine whether the subdomain has a DNS wildcard, and if so, which type is it?
 	if detected {
 		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.detector.address, "*."+sub)
 	}
@@ -245,7 +235,7 @@ func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype ui
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
 		msg := QueryMsg(name, qtype)
-		req := &resolveRequest{
+		req := &request{
 			Ctx:    ctx,
 			ID:     msg.Id,
 			Name:   RemoveLastDot(msg.Question[0].Name),
@@ -272,36 +262,6 @@ loop:
 		}
 	}
 	return nil
-}
-
-func (r *Resolvers) testIPsAcrossLevels(ctx context.Context, name, domain string) bool {
-	base := len(strings.Split(domain, "."))
-	labels := strings.Split(strings.ToLower(name), ".")
-	if len(labels) <= base || (len(labels)-base) < 3 {
-		return false
-	}
-
-	l := len(labels) - base
-	records := stringset.New()
-	defer records.Close()
-loop:
-	for i := 1; i <= l; i++ {
-		select {
-		case <-ctx.Done():
-			break loop
-		default:
-		}
-		w := r.getWildcard(strings.Join(labels[i:], "."))
-		if w == nil || w.Answers == nil || len(w.Answers) == 0 {
-			break
-		}
-		if i == 1 {
-			insertRecordData(records, w.Answers)
-		} else {
-			intersectRecordData(records, w.Answers)
-		}
-	}
-	return records.Len() > 0
 }
 
 func intersectRecordData(set *stringset.Set, ans []*ExtractedAnswer) {

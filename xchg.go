@@ -14,12 +14,13 @@ import (
 	"github.com/miekg/dns"
 )
 
+// RcodeNoResponse is a special status code used to indicate no response or package error.
 const RcodeNoResponse int = 50
 
 // QueryTimeout is the duration until a Resolver query expires.
 var QueryTimeout = 2 * time.Second
 
-type resolveRequest struct {
+type request struct {
 	Ctx       context.Context
 	ID        uint16
 	Timestamp time.Time
@@ -29,25 +30,26 @@ type resolveRequest struct {
 	Result    chan *dns.Msg
 }
 
-func (r *resolveRequest) errNoResponse() {
+func (r *request) errNoResponse() {
 	r.Msg.Rcode = RcodeNoResponse
 	r.Result <- r.Msg
 }
 
-type xchgManager struct {
+// The xchgMgr handles DNS message IDs and identifying messages that have timed out.
+type xchgMgr struct {
 	sync.Mutex
-	xchgs map[string]*resolveRequest
+	xchgs map[string]*request
 }
 
-func newXchgManager() *xchgManager {
-	return &xchgManager{xchgs: make(map[string]*resolveRequest)}
+func newXchgMgr() *xchgMgr {
+	return &xchgMgr{xchgs: make(map[string]*request)}
 }
 
 func xchgKey(id uint16, name string) string {
 	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
 }
 
-func (r *xchgManager) add(req *resolveRequest) error {
+func (r *xchgMgr) add(req *request) error {
 	r.Lock()
 	defer r.Unlock()
 
@@ -55,12 +57,11 @@ func (r *xchgManager) add(req *resolveRequest) error {
 	if _, found := r.xchgs[key]; found {
 		return fmt.Errorf("key %s is already in use", key)
 	}
-
 	r.xchgs[key] = req
 	return nil
 }
 
-func (r *xchgManager) updateTimestamp(id uint16, name string) {
+func (r *xchgMgr) updateTimestamp(id uint16, name string) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -68,28 +69,21 @@ func (r *xchgManager) updateTimestamp(id uint16, name string) {
 	if _, found := r.xchgs[key]; !found {
 		return
 	}
-
 	r.xchgs[key].Timestamp = time.Now()
 }
 
-func (r *xchgManager) remove(id uint16, name string) *resolveRequest {
+func (r *xchgMgr) remove(id uint16, name string) *request {
 	r.Lock()
 	defer r.Unlock()
 
 	key := xchgKey(id, name)
-	if _, found := r.xchgs[key]; !found {
-		return nil
+	if _, found := r.xchgs[key]; found {
+		return r.delete([]string{key})[0]
 	}
-
-	reqs := r.delete([]string{key})
-	if len(reqs) != 1 {
-		return nil
-	}
-
-	return reqs[0]
+	return nil
 }
 
-func (r *xchgManager) removeExpired() []*resolveRequest {
+func (r *xchgMgr) removeExpired() []*request {
 	r.Lock()
 	defer r.Unlock()
 
@@ -100,11 +94,10 @@ func (r *xchgManager) removeExpired() []*resolveRequest {
 			keys = append(keys, key)
 		}
 	}
-
 	return r.delete(keys)
 }
 
-func (r *xchgManager) removeAll() []*resolveRequest {
+func (r *xchgMgr) removeAll() []*request {
 	r.Lock()
 	defer r.Unlock()
 
@@ -112,18 +105,16 @@ func (r *xchgManager) removeAll() []*resolveRequest {
 	for key := range r.xchgs {
 		keys = append(keys, key)
 	}
-
 	return r.delete(keys)
 }
 
-func (r *xchgManager) delete(keys []string) []*resolveRequest {
-	var removed []*resolveRequest
+func (r *xchgMgr) delete(keys []string) []*request {
+	var removed []*request
 
 	for _, k := range keys {
 		removed = append(removed, r.xchgs[k])
 		r.xchgs[k] = nil
 		delete(r.xchgs, k)
 	}
-
 	return removed
 }

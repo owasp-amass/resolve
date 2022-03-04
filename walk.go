@@ -13,21 +13,26 @@ import (
 )
 
 // NsecTraversal attempts to retrieve a DNS zone using NSEC-walking.
-func NsecTraversal(ctx context.Context, r *Resolvers, domain string) ([]*dns.NSEC, bool, error) {
+func (r *Resolvers) NsecTraversal(ctx context.Context, domain string) ([]*dns.NSEC, error) {
 	select {
+	case <-ctx.Done():
+		return nil, errors.New("the context has expired")
 	case <-r.done:
-		return nil, true, errors.New("resolver: The resolver has been stopped")
+		return nil, errors.New("the resolver pool has been stopped")
 	default:
 	}
 
 	found := true
+	var err error
 	domain = domain + "."
 	var results []*dns.NSEC
 	names := make(map[string]struct{})
 	for next := domain; found; {
 		found = false
+		var nsec *dns.NSEC
 
-		if nsec, err := searchGap(ctx, r, next, domain); err == nil {
+		nsec, err = r.searchGap(ctx, next, domain)
+		if err == nil {
 			if _, yes := names[nsec.NextDomain]; yes {
 				break
 			}
@@ -37,25 +42,29 @@ func NsecTraversal(ctx context.Context, r *Resolvers, domain string) ([]*dns.NSE
 			next = nsec.NextDomain
 			results = append(results, nsec)
 		}
-
 		if next == domain {
 			break
 		}
 	}
-	return results, false, nil
+	return results, err
 }
 
-func searchGap(ctx context.Context, r *Resolvers, name, domain string) (*dns.NSEC, error) {
-	msg, err := r.QueryBlocking(ctx, WalkMsg(name, dns.TypeNSEC))
-	if err != nil || len(msg.Answer) == 0 {
-		return nil, fmt.Errorf("NsecTraversal: Query for %s NSEC record failed: %v", name, err)
-	}
-
-	for _, rr := range append(msg.Answer, msg.Ns...) {
-		if nsec, ok := rr.(*dns.NSEC); ok {
-			return nsec, nil
+func (r *Resolvers) searchGap(ctx context.Context, name, domain string) (*dns.NSEC, error) {
+	for i := 0; i < maxQueryAttempts; i++ {
+		resp, err := r.QueryBlocking(ctx, WalkMsg(name, dns.TypeNSEC))
+		if err != nil || resp.Rcode == dns.RcodeNameError {
+			break
+		}
+		if resp.Rcode == dns.RcodeSuccess {
+			if len(resp.Answer) == 0 {
+				break
+			}
+			for _, rr := range append(resp.Answer, resp.Ns...) {
+				if nsec, ok := rr.(*dns.NSEC); ok {
+					return nsec, nil
+				}
+			}
 		}
 	}
-
-	return nil, fmt.Errorf("NsecTraversal: NSEC record not found")
+	return nil, fmt.Errorf("NsecTraversal: %s NSEC record not found", name)
 }

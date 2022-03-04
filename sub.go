@@ -15,29 +15,27 @@ import (
 // Resolver that responds successfully to a DNS query for the NS record type.
 func FirstProperSubdomain(ctx context.Context, r *Resolvers, name string) string {
 	var domain string
-
 	// Obtain all parts of the subdomain name
 	labels := strings.Split(strings.TrimSpace(name), ".")
-
+loop:
 	for i := 0; i < len(labels)-1; i++ {
 		sub := strings.Join(labels[i:], ".")
 
-		msg := QueryMsg(sub, dns.TypeNS)
-		if ns, err := r.QueryBlocking(ctx, msg); err == nil {
-			rr := ExtractAnswers(ns)
-			if len(rr) == 0 {
-				continue
+		for i := 0; i < maxQueryAttempts; i++ {
+			resp, err := r.QueryBlocking(ctx, QueryMsg(sub, dns.TypeNS))
+			if err != nil || resp.Rcode == dns.RcodeNameError {
+				continue loop
 			}
-
-			d := AnswersByType(rr, dns.TypeNS)
-			if len(d) == 0 {
-				continue
+			if resp.Rcode == dns.RcodeSuccess {
+				if len(resp.Answer) == 0 {
+					continue loop
+				}
+				if d := AnswersByType(ExtractAnswers(resp), dns.TypeNS); len(d) > 0 {
+					domain = sub
+					break loop
+				}
 			}
-
-			domain = sub
-			break
 		}
 	}
-
 	return domain
 }

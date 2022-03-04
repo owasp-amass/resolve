@@ -6,7 +6,6 @@ package resolve
 
 import (
 	"testing"
-	"time"
 )
 
 func TestClientSubnetCheck(t *testing.T) {
@@ -23,12 +22,10 @@ func TestClientSubnetCheck(t *testing.T) {
 		if err := ClientSubnetCheck(r); err != nil {
 			t.Errorf("%v", err)
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 	for _, r := range bad {
 		if err := ClientSubnetCheck(r); err == nil {
 			t.Errorf("%s should have failed the test", r)
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 }

@@ -105,10 +105,11 @@ var nsecLinkedList []string = []string{
 }
 
 func TestNsecTraversal(t *testing.T) {
-	dns.HandleFunc("walk.com.", walkHandler)
-	defer dns.HandleRemove("walk.com.")
+	name := "walk.com."
+	dns.HandleFunc(name, walkHandler)
+	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := runLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer(":0")
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
@@ -116,12 +117,9 @@ func TestNsecTraversal(t *testing.T) {
 
 	r := NewResolvers()
 	r.AddResolvers(100, addrstr)
-	defer r.Stop()
 
-	names, rfail, err := NsecTraversal(context.Background(), r, "walk.com")
-	if rfail {
-		t.Errorf("Resolver failed during the NSEC traversal")
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	names, err := r.NsecTraversal(ctx, "walk.com")
 	if err != nil {
 		t.Errorf("The NSEC traversal was not successful: %v", err)
 	}
@@ -140,6 +138,44 @@ func TestNsecTraversal(t *testing.T) {
 	if nsecSet.Len() != 0 {
 		t.Errorf("The NSEC traversal found %d names and failed to discover the following names: %v", set.Len(), nsecSet.Slice())
 	}
+
+	cancel()
+	if _, err := r.NsecTraversal(ctx, "walk.com"); err == nil {
+		t.Errorf("The NSEC traversal failed to return an error with an expired context")
+	}
+
+	r.Stop()
+	if _, err := r.NsecTraversal(context.Background(), "walk.com"); err == nil {
+		t.Errorf("The NSEC traversal failed to return an error with a stopped resolver pool")
+	}
+}
+
+func TestBadNsecTraversal(t *testing.T) {
+	name := "walk.com."
+	dns.HandleFunc(name, noNSECHandler)
+	defer dns.HandleRemove(name)
+
+	s, addrstr, _, err := RunLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("Unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	defer r.Stop()
+	r.AddResolvers(100, addrstr)
+
+	if _, err := r.NsecTraversal(context.Background(), "walk.com"); err == nil {
+		t.Errorf("The NSEC traversal failed to return an error when the NSEC record was absent")
+	}
+}
+
+func noNSECHandler(w dns.ResponseWriter, req *dns.Msg) {
+	m := new(dns.Msg)
+	m.SetReply(req)
+
+	m.Rcode = dns.RcodeSuccess
+	_ = w.WriteMsg(m)
 }
 
 func walkHandler(w dns.ResponseWriter, req *dns.Msg) {

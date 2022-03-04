@@ -27,25 +27,16 @@ func ClientSubnetCheck(resolver string) error {
 		return fmt.Errorf("ClientSubnetCheck: Failed to query 'o-o.myaddr.l.google.com' using the resolver at %s: %v", resolver, err)
 	}
 
-	ans := ExtractAnswers(resp)
-	if len(ans) == 0 {
-		return fmt.Errorf("ClientSubnetCheck: No answers returned from 'o-o.myaddr.l.google.com' using the resolver at %s", resolver)
-	}
-
-	records := AnswersByType(ans, dns.TypeTXT)
-	if len(records) == 0 {
-		return fmt.Errorf("ClientSubnetCheck: No TXT records returned from 'o-o.myaddr.l.google.com' using the resolver at %s", resolver)
-	}
-
-	var found bool
-	for _, rr := range records {
-		found = strings.HasPrefix(rr.Data, "edns0-client-subnet")
-		if found {
-			break
+	err = fmt.Errorf("ClientSubnetCheck: No answers returned from 'o-o.myaddr.l.google.com' using the resolver at %s", resolver)
+	if ans := ExtractAnswers(resp); len(ans) > 0 {
+		if records := AnswersByType(ans, dns.TypeTXT); len(records) > 0 {
+			err = nil
+			for _, rr := range records {
+				if strings.HasPrefix(rr.Data, "edns0-client-subnet") {
+					return fmt.Errorf("ClientSubnetCheck: The EDNS client subnet data was sent through using resolver %s", resolver)
+				}
+			}
 		}
 	}
-	if found {
-		return fmt.Errorf("ClientSubnetCheck: The EDNS client subnet data was sent through using resolver %s", resolver)
-	}
-	return nil
+	return err
 }
