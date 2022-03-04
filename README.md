@@ -1,5 +1,3 @@
-# Extremely fast use of DNS nameservers
-
 ![GitHub Test Status](https://github.com/caffix/resolve/workflows/tests/badge.svg)
 [![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/caffix/resolve?tab=overview)
 [![License](https://img.shields.io/github/license/caffix/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -17,7 +15,7 @@
 [![Cash App](https://img.shields.io/badge/-cash_app-00C244?style=flat-square&logo=cashapp&logoColor=fff)](https://cash.app/$caffix)
 [![GitHub Sponsors](https://img.shields.io/badge/github%20sponsors-%23EA4AAA.svg?&style=flat&logo=github%20sponsors&logoColor=white)](https://github.com/sponsors/caffix)
 
----
+# Extremely fast use of DNS nameservers
 
 Designed to support DNS brute-forcing with minimal system resources:
 
@@ -35,7 +33,8 @@ go get -v -u github.com/caffix/resolve@master
 ## Usage
 
 ```go
-var defaultResolvers = []string{
+qps := 15
+var nameservers = []string{
 	"8.8.8.8",        // Google
 	"1.1.1.1",        // Cloudflare
 	"9.9.9.9",        // Quad9
@@ -55,21 +54,32 @@ var defaultResolvers = []string{
 	"76.76.2.0",      // ControlD
 }
 r := resolve.NewResolvers()
-r.AddResolvers(10, defaultResolvers...)
+_ = r.AddResolvers(qps, nameservers...)
 defer r.Stop()
 
-ctx := context.Background()
-ch := r.QueryChan(ctx, resolve.QueryMsg("mail.google.com", 1))
+ctx, cancel := context.WithTimeout(context.Background(), 30 * time.Second)
+defer cancel()
 
-resp := <-ch
-if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) == 0 {
-    return errors.New("zero answers returned")
-}
-if r.WildcardDetected(ctx, resp, "google.com") {
-    return errors.New("wildcard detected")
+ch := make(chan *dns.Msg, 100)
+for _, name := range names {
+	r.Query(ctx, resolve.QueryMsg(name, 1), ch)
 }
 
-fmt.Println(ExtractAnswers(resp)[0].Data)
+for {
+	select {
+	case <-ctx.Done():
+		return
+	case resp := <-ch:
+		if resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+			ans := ExtractAnswers(resp)
+			domain, err := publicsuffix.EffectiveTLDPlusOne(ans[0].Name)
+
+    		if err == nil && !r.WildcardDetected(ctx, resp, domain) {
+    			fmt.Printf("%s resolved to %s\n", ans[0].Name, ans[0].Data)
+			}
+		}
+	}
+}
 ```
 
 ## Licensing [![License](https://img.shields.io/github/license/caffix/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
