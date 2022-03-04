@@ -68,7 +68,7 @@ func TestPoolQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(1000, addrstr)
+	_ = r.AddResolvers(1000, addrstr)
 	defer r.Stop()
 
 	err = nil
@@ -93,7 +93,7 @@ func TestLen(t *testing.T) {
 		t.Errorf("the length was greater than zero before adding DNS resolvers")
 	}
 	// Test that the length equals one after adding a single resolver
-	r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers(10, "8.8.8.8")
 	if r.Len() != 1 {
 		t.Errorf("the length did not equal one after adding the first resolver")
 	}
@@ -149,7 +149,7 @@ func TestAddResolvers(t *testing.T) {
 
 func TestStopped(t *testing.T) {
 	r := NewResolvers()
-	r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers(10, "8.8.8.8")
 
 	// The resolver should not be considered stopped
 	select {
@@ -180,7 +180,7 @@ func TestQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	ch := make(chan *dns.Msg, 2)
@@ -201,7 +201,7 @@ func TestQueryChan(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
@@ -222,7 +222,7 @@ func TestQueryBlocking(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -263,7 +263,7 @@ func TestQueryTimeout(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
@@ -283,7 +283,7 @@ func TestEdgeCases(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
@@ -309,7 +309,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 	res := r.searchList(addrstr)
 	res.conn.Close()
@@ -332,7 +332,7 @@ func TestTruncatedMsgs(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	// Perform the query to call the TCP exchange
@@ -351,7 +351,7 @@ func TestTCPExchange(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 	res := r.searchList(addrstr)
 
@@ -387,7 +387,7 @@ func TestBadTCPExchange(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 	res := r.searchList(addrstr)
 
