@@ -61,9 +61,11 @@ ctx, cancel := context.WithTimeout(context.Background(), 30 * time.Second)
 defer cancel()
 
 ch := make(chan *dns.Msg, 100)
-for _, name := range names {
-	r.Query(ctx, resolve.QueryMsg(name, 1), ch)
-}
+go func() {
+	for _, name := range names {
+		r.Query(ctx, resolve.QueryMsg(name, 1), ch)
+	}
+}()
 
 for {
 	select {
@@ -74,8 +76,8 @@ for {
 			ans := ExtractAnswers(resp)
 			domain, err := publicsuffix.EffectiveTLDPlusOne(ans[0].Name)
 
-    		if err == nil && !r.WildcardDetected(ctx, resp, domain) {
-    			fmt.Printf("%s resolved to %s\n", ans[0].Name, ans[0].Data)
+			if err == nil && !r.WildcardDetected(ctx, resp, domain) {
+				fmt.Printf("%s resolved to %s\n", ans[0].Name, ans[0].Data)
 			}
 		}
 	}
