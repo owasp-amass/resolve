@@ -17,8 +17,8 @@ import (
 // RcodeNoResponse is a special status code used to indicate no response or package error.
 const RcodeNoResponse int = 50
 
-// QueryTimeout is the duration until a Resolver query expires.
-var QueryTimeout = 2 * time.Second
+// QueryTimeout is the duration waited until a DNS query expires.
+var QueryTimeout = time.Second
 
 type request struct {
 	Ctx       context.Context

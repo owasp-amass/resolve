@@ -253,7 +253,7 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 		addr = net.JoinHostPort(addr, "53")
 	}
 	if res := r.searchList(addr); res != nil {
-		return res
+		return nil
 	}
 
 	var res *resolver
@@ -320,11 +320,10 @@ func (r *Resolvers) searchListWithLock(addr string) *resolver {
 
 	return r.searchList(addr)
 }
+
 func (r *Resolvers) searchList(addr string) *resolver {
-	for _, res := range r.list {
-		if res.address == addr {
-			return res
-		}
+	if ridx, found := r.rmap[addr]; found {
+		return r.list[ridx]
 	}
 	return nil
 }
@@ -444,7 +443,7 @@ func (r *resolver) tcpExchange(req *request) {
 }
 
 func (r *resolver) timeouts() {
-	t := time.NewTicker(500 * time.Millisecond)
+	t := time.NewTicker(100 * time.Millisecond)
 	defer t.Stop()
 
 	for {
