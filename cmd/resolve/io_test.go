@@ -21,8 +21,9 @@ func TestCommaSep(t *testing.T) {
 		expected string
 	}{
 		{
-			label: "Empty input",
-			input: "",
+			label:    "Empty input",
+			input:    "",
+			expected: "",
 		}, {
 			label:    "Valid input",
 			input:    "CNAME,A,AAAA",
@@ -45,14 +46,12 @@ func TestCommaSep(t *testing.T) {
 		f := func(t *testing.T) {
 			var qtypes CommaSep
 
-			if err := qtypes.Set(c.input); err != nil && c.ok {
-				t.Errorf("Got: %v; Expected: <nil>", err)
-			} else if err == nil && !c.ok {
-				t.Error("Got: <nil>; Expected: some error")
-			} else if err == nil && c.ok {
+			if err := qtypes.Set(c.input); (err == nil) == c.ok {
 				if got := qtypes.String(); got != c.expected {
-					t.Errorf("Got: %q; Expected: %q", got, c.expected)
+					t.Errorf("Got: %s; Expected: %s", got, c.expected)
 				}
+			} else {
+				t.Errorf("Set did not return the expected error value: %v", err)
 			}
 		}
 		t.Run(c.label, f)
@@ -64,7 +63,7 @@ func TestResolverList(t *testing.T) {
 	defer set.Close()
 
 	for _, p := range []string{"", "../../example/resolvers.txt"} {
-		list := stringset.New(ResolverList(p)...)
+		list := stringset.New(ResolverFileList(p)...)
 		defer list.Close()
 
 		list.Intersect(set)
@@ -106,6 +105,39 @@ func TestExtractLines(t *testing.T) {
 		return errors.New("failed to receive the provided string")
 	}); err == nil {
 		t.Errorf("Failed to receive the callback routine error message")
+	}
+}
+
+func TestStringsToQtypes(t *testing.T) {
+	cases := []struct {
+		label    string
+		qtypes   []string
+		expected []uint16
+	}{
+		{
+			label:    "Empty input",
+			qtypes:   []string{},
+			expected: []uint16{},
+		}, {
+			label:    "Valid input",
+			qtypes:   []string{"CNAME", "A", "AAAA"},
+			expected: []uint16{dns.TypeCNAME, dns.TypeA, dns.TypeAAAA},
+		}, {
+			label:    "Invalid input",
+			qtypes:   []string{"WRONG", "A", "INVALID", "PTR"},
+			expected: []uint16{dns.TypeA, dns.TypePTR},
+		},
+	}
+
+	for _, c := range cases {
+		f := func(t *testing.T) {
+			for i, got := range StringsToQtypes(c.qtypes) {
+				if got != c.expected[i] {
+					t.Errorf("Got: %d; Expected: %d", got, c.expected[i])
+				}
+			}
+		}
+		t.Run(c.label, f)
 	}
 }
 

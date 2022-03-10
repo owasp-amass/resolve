@@ -39,12 +39,12 @@ var resolvers = []string{
 // CommaSep implements the flag.Value interface.
 type CommaSep []string
 
-// String implements the fmt.Stringer interface
-func (c *CommaSep) String() string {
-	if c == nil {
+// String implements the fmt.Stringer interface.
+func (c CommaSep) String() string {
+	if len(c) == 0 {
 		return ""
 	}
-	return strings.Join(*c, ",")
+	return strings.Join(c, ",")
 }
 
 // Set implements the flag.Value interface.
@@ -62,7 +62,7 @@ func (c *CommaSep) Set(s string) error {
 	return nil
 }
 
-func ResolverList(p string) []string {
+func ResolverFileList(p string) []string {
 	set := stringset.New()
 	defer set.Close()
 
@@ -101,6 +101,17 @@ func ExtractLines(reader io.Reader, cb func(str string) error) error {
 		}
 	}
 	return scanner.Err()
+}
+
+func StringsToQtypes(strs []string) []uint16 {
+	var qtypes []uint16
+
+	for _, str := range strs {
+		if qtype := StringToQtype(str); qtype != dns.TypeNone {
+			qtypes = append(qtypes, qtype)
+		}
+	}
+	return qtypes
 }
 
 func StringToQtype(str string) uint16 {
