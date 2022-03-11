@@ -3,7 +3,7 @@ module github.com/caffix/resolve
 go 1.16
 
 require (
-	github.com/caffix/queue v0.1.1
+	github.com/caffix/queue v0.1.2
 	github.com/caffix/stringset v0.1.0
 	github.com/miekg/dns v1.1.46
 	github.com/stretchr/testify v1.7.0 // indirect
