@@ -71,8 +71,8 @@ func (r *Resolvers) Len() int {
 	return len(r.list)
 }
 
-// AddLogger assigns a new logger to the resolver pool.
-func (r *Resolvers) AddLogger(l *log.Logger) {
+// SetLogger assigns a new logger to the resolver pool.
+func (r *Resolvers) SetLogger(l *log.Logger) {
 	r.log = l
 }
 
@@ -84,8 +84,8 @@ func (r *Resolvers) QPS() int {
 	return r.qps
 }
 
-// AddMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
-func (r *Resolvers) AddMaxQPS(qps int) {
+// SetMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
+func (r *Resolvers) SetMaxQPS(qps int) {
 	r.qps = qps
 	if qps > 0 {
 		r.maxSet = true
@@ -143,14 +143,15 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		r.queue.Append(&request{
-			Ctx:    ctx,
-			ID:     msg.Id,
-			Name:   RemoveLastDot(msg.Question[0].Name),
-			Qtype:  msg.Question[0].Qtype,
-			Msg:    msg,
-			Result: ch,
-		})
+		req := reqPool.Get().(*request)
+
+		req.Ctx = ctx
+		req.ID = msg.Id
+		req.Name = RemoveLastDot(msg.Question[0].Name)
+		req.Qtype = msg.Question[0].Qtype
+		req.Msg = msg
+		req.Result = ch
+		r.queue.Append(req)
 		return
 	}
 
@@ -202,6 +203,7 @@ func (r *Resolvers) enforceMaxQPS() {
 					continue
 				}
 				req.errNoResponse()
+				releaseRequest(req)
 			}
 		}
 	}
@@ -304,12 +306,14 @@ func (r *Resolvers) stopResolver(idx int) {
 		}
 		if req, ok := e.(*request); ok && req.Msg != nil {
 			req.errNoResponse()
+			releaseRequest(req)
 		}
 	}
 	// Drains the xchgs of all messages and allows callers to return
 	for _, req := range res.xchgs.removeAll() {
 		if req.Msg != nil {
 			req.errNoResponse()
+			releaseRequest(req)
 		}
 	}
 }
@@ -374,6 +378,7 @@ func min(x, y int) int {
 func (r *resolver) query(req *request) {
 	if err := r.xchgs.add(req); err != nil {
 		req.errNoResponse()
+		releaseRequest(req)
 		return
 	}
 	r.xchgQueue.Append(req)
@@ -395,12 +400,14 @@ func (r *resolver) writeNextMsg() {
 	select {
 	case <-req.Ctx.Done():
 		req.errNoResponse()
+		releaseRequest(req)
 		return
 	default:
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		_ = r.xchgs.remove(req.ID, req.Name)
 		req.errNoResponse()
+		releaseRequest(req)
 		return
 	}
 	// Set the timestamp for message expiration
@@ -425,6 +432,7 @@ func (r *resolver) responses() {
 					continue
 				}
 				req.Result <- m
+				releaseRequest(req)
 			}
 		}
 	}
@@ -437,9 +445,10 @@ func (r *resolver) tcpExchange(req *request) {
 	}
 	if m, _, err := client.Exchange(req.Msg, r.address); err == nil {
 		req.Result <- m
-		return
+	} else {
+		req.errNoResponse()
 	}
-	req.errNoResponse()
+	releaseRequest(req)
 }
 
 func (r *resolver) timeouts() {
@@ -455,6 +464,7 @@ func (r *resolver) timeouts() {
 				if req.Msg != nil {
 					req.errNoResponse()
 				}
+				releaseRequest(req)
 			}
 		}
 	}

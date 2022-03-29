@@ -103,7 +103,7 @@ func TestAddLogger(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
 
-	r.AddLogger(nil)
+	r.SetLogger(nil)
 	if r.log != nil {
 		t.Errorf("failed to set the resolver pool logger")
 	}
@@ -119,7 +119,7 @@ func TestQPS(t *testing.T) {
 
 	qps := 100
 	// Test that the value returned by QPS equals the qps provided
-	r.AddMaxQPS(qps)
+	r.SetMaxQPS(qps)
 	if r.QPS() != qps {
 		t.Errorf("the value returned by QPS did not equal the qps provided to AddMaxQPS")
 	}
@@ -128,7 +128,7 @@ func TestQPS(t *testing.T) {
 		t.Errorf("the rate limiter was not setup after providing a qps greater than zero")
 	}
 	// The rate limiter should be removed once we zero out the qps
-	r.AddMaxQPS(0)
+	r.SetMaxQPS(0)
 	if r.maxSet || r.rate != nil {
 		t.Errorf("the rate limiter was not removed after providing a qps of zero")
 	}
@@ -244,7 +244,7 @@ func TestQueryBlocking(t *testing.T) {
 
 func TestEnforceMaxQPS(t *testing.T) {
 	r := NewResolvers()
-	r.AddMaxQPS(20)
+	r.SetMaxQPS(20)
 	// The query should fail since no DNS resolver has been added to the pool
 	resp, _ := r.QueryBlocking(context.Background(), QueryMsg("caffix.net", 1))
 	if resp.Rcode != RcodeNoResponse {

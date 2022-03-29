@@ -35,6 +35,17 @@ func (r *request) errNoResponse() {
 	r.Result <- r.Msg
 }
 
+var reqPool = sync.Pool{
+	New: func() interface{} {
+		return new(request)
+	},
+}
+
+func releaseRequest(req *request) {
+	*req = request{} // Zero it out
+	reqPool.Put(req)
+}
+
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.
 type xchgMgr struct {
 	sync.Mutex
