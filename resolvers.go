@@ -296,20 +296,12 @@ func (r *Resolvers) stopResolver(idx int) {
 	if !r.maxSet {
 		r.qps -= res.qps
 	}
+	// Drains the xchgQueue of all requests
+	res.xchgQueue.Process(func(e interface{}) {})
+	// Send the signal to shutdown and close the connection
 	close(res.done)
 	res.conn.Close()
-	// Drains the xchgQueue of all requests and allows callers to return
-	for {
-		e, ok := res.xchgQueue.Next()
-		if !ok {
-			break
-		}
-		if req, ok := e.(*request); ok && req.Msg != nil {
-			req.errNoResponse()
-			releaseRequest(req)
-		}
-	}
-	// Drains the xchgs of all messages and allows callers to return
+	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range res.xchgs.removeAll() {
 		if req.Msg != nil {
 			req.errNoResponse()
