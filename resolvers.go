@@ -51,7 +51,7 @@ type resolver struct {
 // NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
 func NewResolvers() *Resolvers {
 	r := &Resolvers{
-		done:      make(chan struct{}, 2),
+		done:      make(chan struct{}, 1),
 		log:       log.New(ioutil.Discard, "", 0),
 		rmap:      make(map[string]int),
 		wildcards: make(map[string]*wildcard),
@@ -139,6 +139,10 @@ func (r *Resolvers) Stop() {
 
 // Query queues the provided DNS message and returns the response on the provided channel.
 func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
+	if msg == nil {
+		ch <- msg
+	}
+
 	select {
 	case <-ctx.Done():
 	case <-r.done:
@@ -161,7 +165,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 
 // Query queues the provided DNS message and sends the response on the returned channel.
 func (r *Resolvers) QueryChan(ctx context.Context, msg *dns.Msg) chan *dns.Msg {
-	ch := make(chan *dns.Msg, 2)
+	ch := make(chan *dns.Msg, 1)
 	r.Query(ctx, msg, ch)
 	return ch
 }
@@ -197,13 +201,13 @@ func (r *Resolvers) enforceMaxQPS() {
 			if !ok {
 				continue
 			}
-			if req, ok := e.(*request); ok && req.Msg != nil {
+			if req, ok := e.(*request); ok {
 				if res := r.randResolver(); res != nil {
 					res.query(req)
 					continue
 				}
 				req.errNoResponse()
-				releaseRequest(req)
+				req.release()
 			}
 		}
 	}
@@ -263,7 +267,7 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	if conn, err := c.Dial(addr); err == nil {
 		_ = conn.SetDeadline(time.Time{})
 		res = &resolver{
-			done:      make(chan struct{}, 2),
+			done:      make(chan struct{}, 1),
 			xchgQueue: queue.NewQueue(),
 			xchgs:     newXchgMgr(),
 			address:   addr,
@@ -303,10 +307,8 @@ func (r *Resolvers) stopResolver(idx int) {
 	res.conn.Close()
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range res.xchgs.removeAll() {
-		if req.Msg != nil {
-			req.errNoResponse()
-			releaseRequest(req)
-		}
+		req.errNoResponse()
+		req.release()
 	}
 }
 
@@ -370,7 +372,7 @@ func min(x, y int) int {
 func (r *resolver) query(req *request) {
 	if err := r.xchgs.add(req); err != nil {
 		req.errNoResponse()
-		releaseRequest(req)
+		req.release()
 		return
 	}
 	r.xchgQueue.Append(req)
@@ -390,21 +392,22 @@ func (r *resolver) writeNextMsg() {
 
 	req := element.(*request)
 	// Check if this request was released
-	if req.ID == 0 {
+	if req.Name == "" {
 		return
 	}
 
 	select {
 	case <-req.Ctx.Done():
+		_ = r.xchgs.remove(req.ID, req.Name)
 		req.errNoResponse()
-		releaseRequest(req)
+		req.release()
 		return
 	default:
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
 		_ = r.xchgs.remove(req.ID, req.Name)
 		req.errNoResponse()
-		releaseRequest(req)
+		req.release()
 		return
 	}
 	// Set the timestamp for message expiration
@@ -429,7 +432,7 @@ func (r *resolver) responses() {
 					continue
 				}
 				req.Result <- m
-				releaseRequest(req)
+				req.release()
 			}
 		}
 	}
@@ -445,7 +448,7 @@ func (r *resolver) tcpExchange(req *request) {
 	} else {
 		req.errNoResponse()
 	}
-	releaseRequest(req)
+	req.release()
 }
 
 func (r *resolver) timeouts() {
@@ -458,10 +461,8 @@ func (r *resolver) timeouts() {
 			return
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
-				if req.Msg != nil {
-					req.errNoResponse()
-				}
-				releaseRequest(req)
+				req.errNoResponse()
+				req.release()
 			}
 		}
 	}

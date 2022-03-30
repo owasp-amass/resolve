@@ -20,6 +20,12 @@ const RcodeNoResponse int = 50
 // QueryTimeout is the duration waited until a DNS query expires.
 var QueryTimeout = time.Second
 
+var reqPool = sync.Pool{
+	New: func() interface{} {
+		return new(request)
+	},
+}
+
 type request struct {
 	Ctx       context.Context
 	ID        uint16
@@ -35,15 +41,9 @@ func (r *request) errNoResponse() {
 	r.Result <- r.Msg
 }
 
-var reqPool = sync.Pool{
-	New: func() interface{} {
-		return new(request)
-	},
-}
-
-func releaseRequest(req *request) {
-	*req = request{} // Zero it out
-	reqPool.Put(req)
+func (r *request) release() {
+	*r = request{} // Zero it out
+	reqPool.Put(r)
 }
 
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.
