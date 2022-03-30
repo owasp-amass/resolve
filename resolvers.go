@@ -389,6 +389,11 @@ func (r *resolver) writeNextMsg() {
 	}
 
 	req := element.(*request)
+	// Check if this request was released
+	if req.ID == 0 {
+		return
+	}
+
 	select {
 	case <-req.Ctx.Done():
 		req.errNoResponse()
