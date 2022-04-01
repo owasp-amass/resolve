@@ -91,15 +91,12 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 		sub := strings.Join(labels[i:], ".")
 
 		w := r.getWildcard(sub)
+		w.Lock()
 		if w == nil {
 			w = &wildcard{}
-			w.Lock()
 			r.setWildcard(sub, w)
 			w.Detected, w.Answers = r.wildcardTest(ctx, sub)
-			w.Unlock()
 		}
-
-		w.Lock()
 		match := w.respMatchesWildcard(resp)
 		w.Unlock()
 
@@ -230,7 +227,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 }
 
 func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []*ExtractedAnswer {
-	ch := make(chan *dns.Msg, 2)
+	ch := make(chan *dns.Msg, 1)
 	detector := r.getDetectionResolver()
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
