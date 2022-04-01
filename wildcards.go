@@ -90,17 +90,8 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 	for i := len(labels) - base; i >= 0; i-- {
 		sub := strings.Join(labels[i:], ".")
 
-		w := r.getWildcard(sub)
-		w.Lock()
-		if w == nil {
-			w = &wildcard{}
-			r.setWildcard(sub, w)
-			w.Detected, w.Answers = r.wildcardTest(ctx, sub)
-		}
-		match := w.respMatchesWildcard(resp)
-		w.Unlock()
-
-		if match {
+		w := r.getWildcard(ctx, sub)
+		if match := w.respMatchesWildcard(resp); match {
 			return true
 		}
 	}
@@ -127,18 +118,24 @@ func (r *Resolvers) getDetectionResolver() *resolver {
 	return r.detector
 }
 
-func (r *Resolvers) getWildcard(sub string) *wildcard {
+func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
 	r.Lock()
-	defer r.Unlock()
+	unlock := true
 
-	return r.wildcards[sub]
-}
-
-func (r *Resolvers) setWildcard(sub string, w *wildcard) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.wildcards[sub] = w
+	w := r.wildcards[sub]
+	if w == nil {
+		w = &wildcard{}
+		r.wildcards[sub] = w
+		w.Lock()
+		unlock = false
+		r.Unlock() // Needs to be released for the following test
+		w.Detected, w.Answers = r.wildcardTest(ctx, sub)
+		w.Unlock()
+	}
+	if unlock {
+		r.Unlock()
+	}
+	return w
 }
 
 func (r *Resolvers) goodDetector() bool {
@@ -157,6 +154,9 @@ func (r *Resolvers) goodDetector() bool {
 }
 
 func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
+	w.Lock()
+	defer w.Unlock()
+
 	if w.Detected {
 		if len(w.Answers) == 0 || len(resp.Answer) == 0 {
 			return w.Detected
