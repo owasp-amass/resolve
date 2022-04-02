@@ -37,7 +37,9 @@ type request struct {
 }
 
 func (r *request) errNoResponse() {
-	r.Msg.Rcode = RcodeNoResponse
+	if r.Msg != nil {
+		r.Msg.Rcode = RcodeNoResponse
+	}
 	r.Result <- r.Msg
 }
 

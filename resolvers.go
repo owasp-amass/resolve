@@ -184,7 +184,11 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 	case <-ctx.Done():
 		return msg, errors.New("the context expired")
 	case resp := <-ch:
-		return resp, nil
+		var err error
+		if resp == nil {
+			err = errors.New("query failed")
+		}
+		return resp, err
 	}
 }
 
