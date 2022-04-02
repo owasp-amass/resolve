@@ -402,16 +402,18 @@ func (r *resolver) writeNextMsg() {
 
 	select {
 	case <-req.Ctx.Done():
-		_ = r.xchgs.remove(req.ID, req.Name)
-		req.errNoResponse()
-		req.release()
+		if rr := r.xchgs.remove(req.ID, req.Name); rr != nil && rr.Name != "" {
+			rr.errNoResponse()
+			rr.release()
+		}
 		return
 	default:
 	}
 	if err := r.conn.WriteMsg(req.Msg); err != nil {
-		_ = r.xchgs.remove(req.ID, req.Name)
-		req.errNoResponse()
-		req.release()
+		if rr := r.xchgs.remove(req.ID, req.Name); rr != nil && rr.Name != "" {
+			rr.errNoResponse()
+			rr.release()
+		}
 		return
 	}
 	// Set the timestamp for message expiration
