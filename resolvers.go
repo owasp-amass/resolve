@@ -35,6 +35,18 @@ type Resolvers struct {
 	rate      ratelimit.Limiter
 	scan      int
 	detector  *resolver
+	timeout   time.Duration
+	options   *ThresholdOptions
+}
+
+type ThresholdOptions struct {
+	ThresholdValue      uint64
+	CumulativeAdditions bool // instead of continuous
+	CountTimeouts       bool
+	CountFormatErrors   bool
+	CountServerFailures bool
+	CountNotImplemented bool
+	CountQueryRefusals  bool
 }
 
 type resolver struct {
@@ -46,6 +58,17 @@ type resolver struct {
 	inc       time.Duration
 	next      time.Time
 	conn      *dns.Conn
+	stats     *stats
+}
+
+type stats struct {
+	sync.Mutex
+	LastSuccess    uint64
+	Timeouts       uint64
+	FormatErrors   uint64
+	ServerFailures uint64
+	NotImplemented uint64
+	QueryRefusals  uint64
 }
 
 // NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
@@ -56,10 +79,13 @@ func NewResolvers() *Resolvers {
 		rmap:      make(map[string]int),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
+		timeout:   DefaultTimeout,
+		options:   new(ThresholdOptions),
 	}
 
 	go r.enforceMaxQPS()
 	go r.sendQueries()
+	go r.thresholdChecks()
 	return r
 }
 
@@ -74,6 +100,33 @@ func (r *Resolvers) Len() int {
 // SetLogger assigns a new logger to the resolver pool.
 func (r *Resolvers) SetLogger(l *log.Logger) {
 	r.log = l
+}
+
+// SetTimeout updates the amount of time this pool will wait for response messages.
+func (r *Resolvers) SetTimeout(d time.Duration) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.timeout = d
+	r.updateResolverTimeouts(d)
+}
+
+func (r *Resolvers) updateResolverTimeouts(d time.Duration) {
+	for _, res := range r.list {
+		select {
+		case <-res.done:
+		default:
+			res.xchgs.setTimeout(d)
+		}
+	}
+}
+
+// SetThresholdOptions updates the settings used for discontinuing use of a resolver due to poor performance.
+func (r *Resolvers) SetThresholdOptions(opt *ThresholdOptions) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.options = opt
 }
 
 // QPS returns the maximum queries per second provided by the resolver pool.
@@ -257,6 +310,60 @@ func (r *Resolvers) checkAllQueues() bool {
 	return sent
 }
 
+func (r *Resolvers) thresholdChecks() {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-t.C:
+			r.shutdownIfThresholdViolated()
+		}
+	}
+}
+
+func (r *Resolvers) shutdownIfThresholdViolated() {
+	r.Lock()
+	list := r.list
+	opts := *r.options
+	r.Unlock()
+
+	if opts.ThresholdValue == 0 {
+		return
+	}
+
+	for idx, res := range list {
+		if !opts.CumulativeAdditions {
+			if res.stats.LastSuccess < opts.ThresholdValue {
+				continue
+			}
+			r.stopResolver(idx)
+		}
+
+		var total uint64
+		if opts.CountTimeouts {
+			total += res.stats.Timeouts
+		}
+		if opts.CountFormatErrors {
+			total += res.stats.FormatErrors
+		}
+		if opts.CountServerFailures {
+			total += res.stats.ServerFailures
+		}
+		if opts.CountNotImplemented {
+			total += res.stats.FormatErrors
+		}
+		if opts.CountQueryRefusals {
+			total += res.stats.FormatErrors
+		}
+		if total > opts.ThresholdValue {
+			r.stopResolver(idx)
+		}
+	}
+}
+
 func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
@@ -273,12 +380,13 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 		res = &resolver{
 			done:      make(chan struct{}, 1),
 			xchgQueue: queue.NewQueue(),
-			xchgs:     newXchgMgr(),
+			xchgs:     newXchgMgr(r.timeout),
 			address:   addr,
 			qps:       qps,
 			inc:       time.Second / time.Duration(qps),
 			next:      time.Now(),
 			conn:      conn,
+			stats:     new(stats),
 		}
 		go res.responses()
 		go res.timeouts()
@@ -287,28 +395,30 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) stopResolver(idx int) {
-	if idx >= r.Len() {
-		return
-	}
-
 	r.Lock()
 	res := r.list[idx]
+	llen := len(r.list)
 	r.Unlock()
+
+	if idx >= llen {
+		return
+	}
 
 	select {
 	case <-res.done:
 		return
 	default:
 	}
+	// Send the signal to shutdown and close the connection
+	close(res.done)
 
 	if !r.maxSet {
+		r.Lock()
 		r.qps -= res.qps
+		r.Unlock()
 	}
 	// Drains the xchgQueue of all requests
 	res.xchgQueue.Process(func(e interface{}) {})
-	// Send the signal to shutdown and close the connection
-	close(res.done)
-	res.conn.Close()
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range res.xchgs.removeAll() {
 		req.errNoResponse()
@@ -334,11 +444,11 @@ func (r *Resolvers) searchList(addr string) *resolver {
 func (r *Resolvers) randResolver() *resolver {
 	var low int
 	var chosen *resolver
-
+loop:
 	for _, res := range r.randList() {
 		select {
 		case <-res.done:
-			continue
+			continue loop
 		default:
 		}
 		if cur := res.xchgQueue.Len(); chosen == nil || cur < low {
@@ -358,8 +468,13 @@ func (r *Resolvers) randList() []*resolver {
 
 	var list []*resolver
 	if rlen := len(r.list); rlen > 0 {
-		for i, j := 0, rand.Intn(rlen); i < r.scan; i, j = i+1, (j+1)%rlen {
-			list = append(list, r.list[j])
+		for a, i, j := 0, 0, rand.Intn(rlen); i < rlen && a < r.scan; i, j = i+1, (j+1)%rlen {
+			select {
+			case <-r.list[j].done:
+			default:
+				list = append(list, r.list[j])
+				a++
+			}
 		}
 	}
 	return list
@@ -374,12 +489,16 @@ func min(x, y int) int {
 }
 
 func (r *resolver) query(req *request) {
-	if err := r.xchgs.add(req); err != nil {
-		req.errNoResponse()
-		req.release()
-		return
+	select {
+	case <-r.done:
+	default:
+		if err := r.xchgs.add(req); err == nil {
+			r.xchgQueue.Append(req)
+			return
+		}
 	}
-	r.xchgQueue.Append(req)
+	req.errNoResponse()
+	req.release()
 }
 
 func (r *resolver) writeNextMsg() {
@@ -431,6 +550,8 @@ func (r *resolver) responses() {
 			return
 		default:
 		}
+
+		_ = r.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
 			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
 				if m.Truncated {
@@ -438,6 +559,7 @@ func (r *resolver) responses() {
 					continue
 				}
 				req.Result <- m
+				r.collectStats(m)
 				req.release()
 			}
 		}
@@ -451,6 +573,7 @@ func (r *resolver) tcpExchange(req *request) {
 	}
 	if m, _, err := client.Exchange(req.Msg, r.address); err == nil {
 		req.Result <- m
+		r.collectStats(m)
 	} else {
 		req.errNoResponse()
 	}
@@ -468,8 +591,65 @@ func (r *resolver) timeouts() {
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
 				req.errNoResponse()
+				r.incTimeouts()
 				req.release()
 			}
 		}
 	}
+}
+
+func (r *resolver) collectStats(resp *dns.Msg) {
+	switch resp.Rcode {
+	case dns.RcodeFormatError:
+		r.incFormatErrors()
+	case dns.RcodeServerFailure:
+		r.incServerFailures()
+	case dns.RcodeNotImplemented:
+		r.incNotImplemented()
+	case dns.RcodeRefused:
+		r.incQueryRefusals()
+	default:
+		r.resetLastSuccess()
+	}
+}
+
+func (r *resolver) resetLastSuccess() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.LastSuccess = 0
+}
+
+func (r *resolver) incTimeouts() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.Timeouts++
+	r.stats.LastSuccess++
+}
+
+func (r *resolver) incFormatErrors() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.FormatErrors++
+	r.stats.LastSuccess++
+}
+
+func (r *resolver) incServerFailures() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.ServerFailures++
+	r.stats.LastSuccess++
+}
+
+func (r *resolver) incNotImplemented() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.NotImplemented++
+	r.stats.LastSuccess++
+}
+
+func (r *resolver) incQueryRefusals() {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+	r.stats.QueryRefusals++
+	r.stats.LastSuccess++
 }

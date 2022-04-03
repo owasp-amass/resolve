@@ -7,7 +7,6 @@ package resolve
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -76,8 +75,8 @@ func TestPoolQuery(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
 		if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
-			fmt.Println("Failed")
 			err = errors.New("incorrect address returned")
+			break
 		}
 	}
 	if err != nil {
