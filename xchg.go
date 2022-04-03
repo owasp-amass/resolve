@@ -17,8 +17,8 @@ import (
 // RcodeNoResponse is a special status code used to indicate no response or package error.
 const RcodeNoResponse int = 50
 
-// QueryTimeout is the duration waited until a DNS query expires.
-var QueryTimeout = time.Second
+// DefaultTimeout is the duration waited until a DNS query expires.
+const DefaultTimeout = time.Second
 
 var reqPool = sync.Pool{
 	New: func() interface{} {
@@ -51,15 +51,26 @@ func (r *request) release() {
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.
 type xchgMgr struct {
 	sync.Mutex
-	xchgs map[string]*request
+	timeout time.Duration
+	xchgs   map[string]*request
 }
 
-func newXchgMgr() *xchgMgr {
-	return &xchgMgr{xchgs: make(map[string]*request)}
+func newXchgMgr(d time.Duration) *xchgMgr {
+	return &xchgMgr{
+		timeout: d,
+		xchgs:   make(map[string]*request),
+	}
 }
 
 func xchgKey(id uint16, name string) string {
 	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
+}
+
+func (r *xchgMgr) setTimeout(d time.Duration) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.timeout = d
 }
 
 func (r *xchgMgr) add(req *request) error {
@@ -103,7 +114,7 @@ func (r *xchgMgr) removeExpired() []*request {
 	now := time.Now()
 	var keys []string
 	for key, req := range r.xchgs {
-		if !req.Timestamp.IsZero() && now.After(req.Timestamp.Add(QueryTimeout)) {
+		if !req.Timestamp.IsZero() && now.After(req.Timestamp.Add(r.timeout)) {
 			keys = append(keys, key)
 		}
 	}

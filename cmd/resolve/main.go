@@ -157,7 +157,7 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 	}
 	// Set the DNS query timeout value using the provided interval
 	if timeout > 0 {
-		resolve.QueryTimeout = time.Duration(timeout) * time.Millisecond
+		p.Pool.SetTimeout(time.Duration(timeout) * time.Millisecond)
 	}
 	// Attempt to set a resolver to perform DNS wildcard detection
 	if detector != "" {

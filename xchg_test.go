@@ -15,7 +15,7 @@ import (
 
 func TestXchgAddRemove(t *testing.T) {
 	name := "caffix.net"
-	xchg := newXchgMgr()
+	xchg := newXchgMgr(DefaultTimeout)
 	msg := QueryMsg(name, dns.TypeA)
 	req := &request{
 		ID:    msg.Id,
@@ -45,7 +45,7 @@ func TestXchgAddRemove(t *testing.T) {
 
 func TestXchgUpdateTimestamp(t *testing.T) {
 	name := "caffix.net"
-	xchg := newXchgMgr()
+	xchg := newXchgMgr(DefaultTimeout)
 	msg := QueryMsg(name, dns.TypeA)
 
 	req := &request{
@@ -72,10 +72,9 @@ func TestXchgUpdateTimestamp(t *testing.T) {
 }
 
 func TestXchgRemoveExpired(t *testing.T) {
-	xchg := newXchgMgr()
+	xchg := newXchgMgr(time.Second)
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
-	QueryTimeout = time.Second
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
 		if err := xchg.add(&request{
@@ -117,10 +116,9 @@ func TestXchgRemoveExpired(t *testing.T) {
 }
 
 func TestXchgRemoveAll(t *testing.T) {
-	xchg := newXchgMgr()
+	xchg := newXchgMgr(time.Second)
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
-	QueryTimeout = time.Second
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
 		if err := xchg.add(&request{
