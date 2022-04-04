@@ -39,16 +39,6 @@ type Resolvers struct {
 	options   *ThresholdOptions
 }
 
-type ThresholdOptions struct {
-	ThresholdValue      uint64
-	CumulativeAdditions bool // instead of continuous
-	CountTimeouts       bool
-	CountFormatErrors   bool
-	CountServerFailures bool
-	CountNotImplemented bool
-	CountQueryRefusals  bool
-}
-
 type resolver struct {
 	done      chan struct{}
 	xchgQueue queue.Queue
@@ -59,16 +49,6 @@ type resolver struct {
 	next      time.Time
 	conn      *dns.Conn
 	stats     *stats
-}
-
-type stats struct {
-	sync.Mutex
-	LastSuccess    uint64
-	Timeouts       uint64
-	FormatErrors   uint64
-	ServerFailures uint64
-	NotImplemented uint64
-	QueryRefusals  uint64
 }
 
 // NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
@@ -108,25 +88,17 @@ func (r *Resolvers) SetTimeout(d time.Duration) {
 	defer r.Unlock()
 
 	r.timeout = d
-	r.updateResolverTimeouts(d)
+	r.updateResolverTimeouts()
 }
 
-func (r *Resolvers) updateResolverTimeouts(d time.Duration) {
+func (r *Resolvers) updateResolverTimeouts() {
 	for _, res := range r.list {
 		select {
 		case <-res.done:
 		default:
-			res.xchgs.setTimeout(d)
+			res.xchgs.setTimeout(r.timeout)
 		}
 	}
-}
-
-// SetThresholdOptions updates the settings used for discontinuing use of a resolver due to poor performance.
-func (r *Resolvers) SetThresholdOptions(opt *ThresholdOptions) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.options = opt
 }
 
 // QPS returns the maximum queries per second provided by the resolver pool.
@@ -194,6 +166,7 @@ func (r *Resolvers) Stop() {
 func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	if msg == nil {
 		ch <- msg
+		return
 	}
 
 	select {
@@ -310,60 +283,6 @@ func (r *Resolvers) checkAllQueues() bool {
 	return sent
 }
 
-func (r *Resolvers) thresholdChecks() {
-	t := time.NewTicker(30 * time.Second)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-t.C:
-			r.shutdownIfThresholdViolated()
-		}
-	}
-}
-
-func (r *Resolvers) shutdownIfThresholdViolated() {
-	r.Lock()
-	list := r.list
-	opts := *r.options
-	r.Unlock()
-
-	if opts.ThresholdValue == 0 {
-		return
-	}
-
-	for idx, res := range list {
-		if !opts.CumulativeAdditions {
-			if res.stats.LastSuccess < opts.ThresholdValue {
-				continue
-			}
-			r.stopResolver(idx)
-		}
-
-		var total uint64
-		if opts.CountTimeouts {
-			total += res.stats.Timeouts
-		}
-		if opts.CountFormatErrors {
-			total += res.stats.FormatErrors
-		}
-		if opts.CountServerFailures {
-			total += res.stats.ServerFailures
-		}
-		if opts.CountNotImplemented {
-			total += res.stats.FormatErrors
-		}
-		if opts.CountQueryRefusals {
-			total += res.stats.FormatErrors
-		}
-		if total > opts.ThresholdValue {
-			r.stopResolver(idx)
-		}
-	}
-}
-
 func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
@@ -395,14 +314,14 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) stopResolver(idx int) {
-	r.Lock()
-	res := r.list[idx]
-	llen := len(r.list)
-	r.Unlock()
-
+	llen := r.Len()
 	if idx >= llen {
 		return
 	}
+
+	r.Lock()
+	res := r.list[idx]
+	r.Unlock()
 
 	select {
 	case <-res.done:
@@ -591,65 +510,9 @@ func (r *resolver) timeouts() {
 		case <-t.C:
 			for _, req := range r.xchgs.removeExpired() {
 				req.errNoResponse()
-				r.incTimeouts()
+				r.collectStats(req.Msg)
 				req.release()
 			}
 		}
 	}
-}
-
-func (r *resolver) collectStats(resp *dns.Msg) {
-	switch resp.Rcode {
-	case dns.RcodeFormatError:
-		r.incFormatErrors()
-	case dns.RcodeServerFailure:
-		r.incServerFailures()
-	case dns.RcodeNotImplemented:
-		r.incNotImplemented()
-	case dns.RcodeRefused:
-		r.incQueryRefusals()
-	default:
-		r.resetLastSuccess()
-	}
-}
-
-func (r *resolver) resetLastSuccess() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.LastSuccess = 0
-}
-
-func (r *resolver) incTimeouts() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.Timeouts++
-	r.stats.LastSuccess++
-}
-
-func (r *resolver) incFormatErrors() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.FormatErrors++
-	r.stats.LastSuccess++
-}
-
-func (r *resolver) incServerFailures() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.ServerFailures++
-	r.stats.LastSuccess++
-}
-
-func (r *resolver) incNotImplemented() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.NotImplemented++
-	r.stats.LastSuccess++
-}
-
-func (r *resolver) incQueryRefusals() {
-	r.stats.Lock()
-	defer r.stats.Unlock()
-	r.stats.QueryRefusals++
-	r.stats.LastSuccess++
 }

@@ -16,6 +16,19 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestSetTimeout(t *testing.T) {
+	r := NewResolvers()
+	_ = r.AddResolvers(1000, "8.8.8.8")
+	defer r.Stop()
+
+	timeout := 2 * time.Second
+	r.SetTimeout(timeout)
+
+	if r.timeout != timeout || r.list[0].xchgs.timeout != timeout {
+		t.Errorf("failed to set the new timeout value throughout the resolver pool")
+	}
+}
+
 func TestMin(t *testing.T) {
 	cases := []struct {
 		x    int
@@ -168,6 +181,31 @@ func TestStopped(t *testing.T) {
 	r.Stop()
 }
 
+func TestStopResolver(t *testing.T) {
+	dns.HandleFunc("timeout.org.", timeoutHandler)
+	defer dns.HandleRemove("timeout.org.")
+
+	s, addrstr, _, err := RunLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	_ = r.AddResolvers(1, addrstr)
+	defer r.Stop()
+
+	r.stopResolver(1)
+	ch := make(chan *dns.Msg, 10)
+	for i := 0; i < 10; i++ {
+		r.Query(context.Background(), QueryMsg("www.timeout.org", 1), ch)
+	}
+	r.stopResolver(0)
+	for i := 0; i < 10; i++ {
+		<-ch
+	}
+}
+
 func TestQuery(t *testing.T) {
 	dns.HandleFunc("caffix.net.", typeAHandler)
 	defer dns.HandleRemove("caffix.net.")
@@ -182,7 +220,11 @@ func TestQuery(t *testing.T) {
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
-	ch := make(chan *dns.Msg, 2)
+	ch := make(chan *dns.Msg, 1)
+	r.Query(context.Background(), nil, ch)
+	if resp := <-ch; resp != nil {
+		t.Errorf("the query did not return the expected nil response message")
+	}
 	r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
 	if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
 		t.Errorf("the query did not return the expected IP address")
@@ -234,7 +276,7 @@ func TestQueryBlocking(t *testing.T) {
 	}
 
 	cancel()
-	// The query should fail since no the context has expired
+	// The query should fail since the context has expired
 	_, err = r.QueryBlocking(ctx, QueryMsg(name, 1))
 	if err == nil {
 		t.Errorf("the query did not fail as expected")
