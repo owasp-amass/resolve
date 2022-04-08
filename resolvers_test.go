@@ -223,8 +223,16 @@ func TestQuery(t *testing.T) {
 	if resp := <-ch; resp != nil {
 		t.Errorf("the query did not return the expected nil response message")
 	}
-	r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
-	if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+
+	var success bool
+	for i := 0; i < 5; i++ {
+		r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
+		if ans := ExtractAnswers(<-ch); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
+			success = true
+			break
+		}
+	}
+	if !success {
 		t.Errorf("the query did not return the expected IP address")
 	}
 }
@@ -243,8 +251,15 @@ func TestQueryChan(t *testing.T) {
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
-	ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
-	if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+	var success bool
+	for i := 0; i < 5; i++ {
+		ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
+		if ans := ExtractAnswers(<-ch); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
+			success = true
+			break
+		}
+	}
+	if !success {
 		t.Errorf("the query did not return the expected IP address")
 	}
 }
@@ -264,12 +279,17 @@ func TestQueryBlocking(t *testing.T) {
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
+	var success bool
 	ctx, cancel := context.WithCancel(context.Background())
-	resp, err := r.QueryBlocking(ctx, QueryMsg(name, 1))
-	if err != nil {
-		t.Errorf("the type A query on resolver failed: %v", err)
+	for i := 0; i < 5; i++ {
+		if resp, err := r.QueryBlocking(ctx, QueryMsg(name, 1)); err == nil {
+			if ans := ExtractAnswers(resp); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
+				success = true
+				break
+			}
+		}
 	}
-	if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+	if !success {
 		t.Errorf("the query did not return the expected IP address")
 	}
 
