@@ -11,6 +11,8 @@ import (
 	"github.com/miekg/dns"
 )
 
+const thresholdCheckInterval time.Duration = 3 * time.Second
+
 type ThresholdOptions struct {
 	ThresholdValue         uint64
 	CumulativeAccumulation bool // instead of continuous
@@ -62,7 +64,7 @@ func (r *Resolvers) updateThresholdOptions() {
 }
 
 func (r *Resolvers) thresholdChecks() {
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(thresholdCheckInterval)
 	defer t.Stop()
 
 	for {
@@ -81,83 +83,90 @@ func (r *Resolvers) shutdownIfThresholdViolated() {
 	opts := *r.options
 	r.Unlock()
 
-	if opts.ThresholdValue == 0 {
+	tv := opts.ThresholdValue
+	if tv == 0 {
 		return
 	}
 
 	for idx, res := range list {
-		res.stats.Lock()
-		if !opts.CumulativeAccumulation {
-			if res.stats.LastSuccess < opts.ThresholdValue {
-				res.stats.Unlock()
-				continue
-			}
-			r.stopResolver(idx)
-		}
+		var stop bool
 
-		var total uint64
-		if opts.CountTimeouts {
-			total += res.stats.Timeouts
+		if opts.CumulativeAccumulation && res.cumulativeThresholdReached(tv) {
+			stop = true
+		} else if res.continuousThresholdReached(tv) {
+			stop = true
 		}
-		if opts.CountFormatErrors {
-			total += res.stats.FormatErrors
-		}
-		if opts.CountServerFailures {
-			total += res.stats.ServerFailures
-		}
-		if opts.CountNotImplemented {
-			total += res.stats.FormatErrors
-		}
-		if opts.CountQueryRefusals {
-			total += res.stats.FormatErrors
-		}
-		if total >= opts.ThresholdValue {
+		if stop {
 			r.stopResolver(idx)
 		}
-		res.stats.Unlock()
 	}
 }
 
-func (r *resolver) collectStats(resp *dns.Msg) {
+func (r *resolver) continuousThresholdReached(tv uint64) bool {
 	r.stats.Lock()
 	defer r.stats.Unlock()
 
+	return r.stats.LastSuccess >= tv
+}
+
+func (r *resolver) cumulativeThresholdReached(tv uint64) bool {
+	r.stats.Lock()
+	defer r.stats.Unlock()
+
+	var total uint64
+	if r.stats.CountTimeouts {
+		total += r.stats.Timeouts
+	}
+	if r.stats.CountFormatErrors {
+		total += r.stats.FormatErrors
+	}
+	if r.stats.CountServerFailures {
+		total += r.stats.ServerFailures
+	}
+	if r.stats.CountNotImplemented {
+		total += r.stats.NotImplemented
+	}
+	if r.stats.CountQueryRefusals {
+		total += r.stats.QueryRefusals
+	}
+	return total >= tv
+}
+
+func (r *resolver) collectStats(resp *dns.Msg) {
 	if resp == nil {
 		return
 	}
 
-	var incLastSuccess bool
+	r.stats.Lock()
+	defer r.stats.Unlock()
+
 	switch resp.Rcode {
 	case RcodeNoResponse:
 		r.stats.Timeouts++
 		if r.stats.CountTimeouts {
-			incLastSuccess = true
+			r.stats.LastSuccess++
 		}
 	case dns.RcodeFormatError:
 		r.stats.FormatErrors++
 		if r.stats.CountFormatErrors {
-			incLastSuccess = true
+			r.stats.LastSuccess++
 		}
 	case dns.RcodeServerFailure:
 		r.stats.ServerFailures++
 		if r.stats.CountServerFailures {
-			incLastSuccess = true
+			r.stats.LastSuccess++
 		}
 	case dns.RcodeNotImplemented:
 		r.stats.NotImplemented++
 		if r.stats.CountNotImplemented {
-			incLastSuccess = true
+			r.stats.LastSuccess++
 		}
 	case dns.RcodeRefused:
 		r.stats.QueryRefusals++
 		if r.stats.CountQueryRefusals {
-			incLastSuccess = true
+			r.stats.LastSuccess++
 		}
 	default:
 		r.stats.LastSuccess = 0
-	}
-
-	if incLastSuccess {
-		r.stats.LastSuccess++
 	}
 }

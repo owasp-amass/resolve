@@ -40,7 +40,7 @@ func TestThresholdContinuousShutdown(t *testing.T) {
 	res := r.list[0]
 	r.Unlock()
 
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(thresholdCheckInterval + time.Second)
 	select {
 	case <-res.done:
 		t.Errorf("resolver was shutdown with no threshold value set")
@@ -50,7 +50,8 @@ func TestThresholdContinuousShutdown(t *testing.T) {
 	var threshold uint64 = 100
 	r.SetThresholdOptions(&ThresholdOptions{ThresholdValue: threshold})
 
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(thresholdCheckInterval + time.Second)
+
 	select {
 	case <-res.done:
 		t.Errorf("resolver was shutdown with a threshold value set and no stats")
@@ -61,7 +62,8 @@ func TestThresholdContinuousShutdown(t *testing.T) {
 	res.stats.LastSuccess = threshold
 	res.stats.Unlock()
 
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(thresholdCheckInterval + time.Second)
+
 	select {
 	case <-res.done:
 	default:
@@ -96,7 +98,8 @@ func TestThresholdCumulativeShutdown(t *testing.T) {
 	res.stats.QueryRefusals = 20
 	res.stats.Unlock()
 
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(thresholdCheckInterval + time.Second)
+
 	select {
 	case <-res.done:
 	default:

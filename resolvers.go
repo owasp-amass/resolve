@@ -337,7 +337,11 @@ func (r *Resolvers) stopResolver(idx int) {
 		r.Unlock()
 	}
 	// Drains the xchgQueue of all requests
-	res.xchgQueue.Process(func(e interface{}) {})
+	res.xchgQueue.Process(func(e interface{}) {
+		req := e.(*request)
+		req.errNoResponse()
+		req.release()
+	})
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range res.xchgs.removeAll() {
 		req.errNoResponse()
@@ -411,10 +415,8 @@ func (r *resolver) query(req *request) {
 	select {
 	case <-r.done:
 	default:
-		if err := r.xchgs.add(req); err == nil {
-			r.xchgQueue.Append(req)
-			return
-		}
+		r.xchgQueue.Append(req)
+		return
 	}
 	req.errNoResponse()
 	req.release()
@@ -431,33 +433,21 @@ func (r *resolver) writeNextMsg() {
 	if !ok {
 		return
 	}
-
 	req := element.(*request)
-	// Check if this request was released
-	if req.Name == "" {
-		return
-	}
 
 	select {
 	case <-req.Ctx.Done():
-		if rr := r.xchgs.remove(req.ID, req.Name); rr != nil && rr.Name != "" {
-			rr.errNoResponse()
-			rr.release()
-		}
-		return
 	default:
-	}
-	if err := r.conn.WriteMsg(req.Msg); err != nil {
-		if rr := r.xchgs.remove(req.ID, req.Name); rr != nil && rr.Name != "" {
-			rr.errNoResponse()
-			rr.release()
+		if err := r.conn.WriteMsg(req.Msg); err == nil && r.xchgs.add(req) == nil {
+			// Set the timestamp for message expiration
+			r.xchgs.updateTimestamp(req.ID, req.Name)
+			// Update the time for the next query to be sent
+			r.next = time.Now().Add(r.inc)
+			return
 		}
-		return
 	}
-	// Set the timestamp for message expiration
-	r.xchgs.updateTimestamp(req.ID, req.Name)
-	// Update the time for the next query to be sent
-	r.next = time.Now().Add(r.inc)
+	req.errNoResponse()
+	req.release()
 }
 
 func (r *resolver) responses() {
@@ -469,7 +459,6 @@ func (r *resolver) responses() {
 			return
 		default:
 		}
-
 		_ = r.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
 			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
