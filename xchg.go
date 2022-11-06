@@ -53,6 +53,7 @@ func (r *request) release() {
 }
 
 type resolver struct {
+	sync.Mutex
 	address string
 	last    time.Time
 	rate    time.Duration
@@ -73,6 +74,27 @@ func initializeResolver(addr string, timeout time.Duration) *resolver {
 	}
 }
 
+func (r *resolver) setLast(last time.Time) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.last = last
+}
+
+func (r *resolver) setRate(rate time.Duration) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.rate = rate
+}
+
+func (r *resolver) lastAndRate() (time.Time, time.Duration) {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.last, r.rate
+}
+
 func (r *resolver) exchange(req *request) {
 	m, rtt, err := r.xchg(req, "udp")
 	if err == nil && m.Truncated {
@@ -83,7 +105,7 @@ func (r *resolver) exchange(req *request) {
 		req.release()
 		return
 	}
-	r.rate = rtt
+	r.setRate(rtt)
 
 	select {
 	case req.Result <- m:
@@ -105,6 +127,6 @@ func (r *resolver) xchg(req *request, protocol string) (*dns.Msg, time.Duration,
 		client.UDPSize = dns.DefaultMsgSize
 	}
 
-	r.last = time.Now()
+	r.setLast(time.Now())
 	return client.ExchangeContext(req.Ctx, req.Msg, r.address)
 }

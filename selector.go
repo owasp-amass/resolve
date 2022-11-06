@@ -123,7 +123,7 @@ func (r *randomSelector) randomAvailableResolver() *resolver {
 		rnd := rand.Intn(rlen)
 		res := r.list[rnd]
 
-		if res.last.Add(res.rate).Before(now) {
+		if last, rate := res.lastAndRate(); last.Add(rate).Before(now) {
 			chosen = res
 			break
 		}
