@@ -27,11 +27,7 @@ type Resolvers struct {
 }
 
 // NewResolvers initializes a Resolvers that operates at the provide number of queries per second.
-func NewResolvers(qps int) *Resolvers {
-	if qps <= 0 {
-		return nil
-	}
-
+func NewResolvers() *Resolvers {
 	return &Resolvers{
 		done:      make(chan struct{}, 1),
 		log:       log.New(io.Discard, "", 0),

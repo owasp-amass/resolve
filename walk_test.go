@@ -115,7 +115,7 @@ func TestNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,7 +161,7 @@ func TestBadNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	defer r.Stop()
 	_ = r.AddResolvers(addrstr)
 

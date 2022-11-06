@@ -16,7 +16,7 @@ import (
 )
 
 func TestSetTimeout(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
@@ -38,7 +38,7 @@ func TestPoolQuery(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -56,7 +56,7 @@ func TestPoolQuery(t *testing.T) {
 }
 
 func TestLen(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	defer r.Stop()
 	// Test that the length is zero before adding DNS resolvers
 	if r.Len() > 0 {
@@ -70,7 +70,7 @@ func TestLen(t *testing.T) {
 }
 
 func TestAddLogger(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	defer r.Stop()
 
 	r.SetLogger(nil)
@@ -80,7 +80,7 @@ func TestAddLogger(t *testing.T) {
 }
 
 func TestAddResolvers(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	defer r.Stop()
 	// Test that the resolver is added
 	if err := r.AddResolvers("8.8.8.8"); err != nil || r.Len() == 0 {
@@ -89,7 +89,7 @@ func TestAddResolvers(t *testing.T) {
 }
 
 func TestStopped(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers("8.8.8.8")
 
 	// The resolver should not be considered stopped
@@ -120,7 +120,7 @@ func TestStopResolver(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -143,7 +143,7 @@ func TestQuery(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -176,7 +176,7 @@ func TestQueryChan(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -204,7 +204,7 @@ func TestQueryBlocking(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -240,7 +240,7 @@ func TestQueryTimeout(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
@@ -260,7 +260,7 @@ func TestEdgeCases(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -286,7 +286,7 @@ func TestTruncatedMsgs(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 	// Perform the query to call the TCP exchange

@@ -17,7 +17,7 @@ import (
 const RcodeNoResponse int = 50
 
 // DefaultTimeout is the duration waited until a DNS query expires.
-const DefaultTimeout = time.Second
+const DefaultTimeout = 2 * time.Second
 
 var reqPool = sync.Pool{
 	New: func() interface{} {
@@ -68,7 +68,7 @@ func initializeResolver(addr string, timeout time.Duration) *resolver {
 	return &resolver{
 		address: addr,
 		last:    time.Now(),
-		rate:    10 * time.Millisecond,
+		rate:    100 * time.Millisecond,
 		timeout: timeout,
 	}
 }

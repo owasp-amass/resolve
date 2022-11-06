@@ -17,13 +17,13 @@ func TestExchange(t *testing.T) {
 	dns.HandleFunc(name, typeAHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalTCPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer(":0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 	res := r.servers.AllResolvers()[0]
@@ -59,23 +59,21 @@ func TestTCPExchange(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 	res := r.servers.AllResolvers()[0]
 
-	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
-	res.xchg(&request{
-		Ctx:    context.Background(),
-		ID:     msg.Id,
-		Name:   RemoveLastDot(msg.Question[0].Name),
-		Qtype:  msg.Question[0].Qtype,
-		Msg:    msg,
-		Result: ch,
+	resp, _, err := res.xchg(&request{
+		Ctx:   context.Background(),
+		ID:    msg.Id,
+		Name:  RemoveLastDot(msg.Question[0].Name),
+		Qtype: msg.Question[0].Qtype,
+		Msg:   msg,
 	}, "tcp")
 
-	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+	if err == nil && resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
 		if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
 			t.Errorf("the query did not return the expected IP address")
 		}
@@ -95,23 +93,21 @@ func TestBadTCPExchange(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 	res := r.servers.AllResolvers()[0]
 
-	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
-	res.xchg(&request{
-		Ctx:    context.Background(),
-		ID:     msg.Id,
-		Name:   RemoveLastDot(msg.Question[0].Name),
-		Qtype:  msg.Question[0].Qtype,
-		Msg:    msg,
-		Result: ch,
+	resp, _, err := res.xchg(&request{
+		Ctx:   context.Background(),
+		ID:    msg.Id,
+		Name:  RemoveLastDot(msg.Question[0].Name),
+		Qtype: msg.Question[0].Qtype,
+		Msg:   msg,
 	}, "tcp")
 
-	if resp := <-ch; resp.Rcode != RcodeNoResponse {
+	if err == nil && resp.Rcode != RcodeNoResponse {
 		t.Errorf("The TCP exchange process did not fail as expected")
 	}
 }

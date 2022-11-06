@@ -14,7 +14,7 @@ import (
 )
 
 func TestSetDetectionResolver(t *testing.T) {
-	r := NewResolvers(100)
+	r := NewResolvers()
 	defer r.Stop()
 
 	r.SetDetectionResolver("8.8.8.8")
@@ -34,7 +34,7 @@ func TestWildcardDetected(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 

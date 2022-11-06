@@ -21,7 +21,7 @@ func TestFirstProperSubdomain(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers(100)
+	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 

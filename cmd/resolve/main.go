@@ -146,7 +146,7 @@ func (p *params) SetupFiles(lpath, opath, ipath string) error {
 }
 
 func (p *params) SetupResolverPool(list []string, rpath string, timeout int, detector string) error {
-	p.Pool = resolve.NewResolvers(p.QPS)
+	p.Pool = resolve.NewResolvers()
 	if p.Pool == nil {
 		return errors.New("failed to create a new Resolvers")
 	}
