@@ -255,7 +255,7 @@ func TestEventLoop(t *testing.T) {
 		Retries: 5,
 	}
 
-	if err := p.SetupResolverPool([]string{addrstr}, "", 100, addrstr); err != nil {
+	if err := p.SetupResolverPool([]string{addrstr}, "", 100, ""); err != nil {
 		t.Fatalf("Failed to setup the resolver pool: %v", err)
 	}
 	defer p.Pool.Stop()

@@ -115,8 +115,8 @@ func TestNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(100, addrstr)
+	r := NewResolvers(100)
+	_ = r.AddResolvers(addrstr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	names, err := r.NsecTraversal(ctx, "walk.com")
@@ -161,9 +161,9 @@ func TestBadNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
+	r := NewResolvers(100)
 	defer r.Stop()
-	_ = r.AddResolvers(100, addrstr)
+	_ = r.AddResolvers(addrstr)
 
 	if _, err := r.NsecTraversal(context.Background(), "walk.com"); err == nil {
 		t.Errorf("The NSEC traversal failed to return an error when the NSEC record was absent")

@@ -7,7 +7,6 @@ package resolve
 import (
 	"context"
 	"math/rand"
-	"net"
 	"strings"
 	"sync"
 
@@ -74,10 +73,6 @@ func UnlikelyName(sub string) string {
 
 // WildcardDetected returns true when the provided DNS response could be a wildcard match.
 func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain string) bool {
-	if !r.goodDetector() {
-		return false
-	}
-
 	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
 	domain = strings.ToLower(RemoveLastDot(domain))
 
@@ -99,23 +94,15 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 }
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
-func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
-	if err := r.AddResolvers(qps, addr); err == nil {
-		if _, _, err := net.SplitHostPort(addr); err != nil {
-			// Add the default port number to the IP address
-			addr = net.JoinHostPort(addr, "53")
-		}
-		if res := r.searchListWithLock(addr); res != nil {
-			r.detector = res
-		}
-	}
+func (r *Resolvers) SetDetectionResolver(addr string) {
+	r.detector = initializeResolver(addr, r.timeout)
 }
 
-func (r *Resolvers) getDetectionResolver() *resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.detector
+func (r *Resolvers) getDetectionResolver(name string) *resolver {
+	if r.detector != nil {
+		return r.detector
+	}
+	return r.servers.GetResolver(name)
 }
 
 func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
@@ -136,21 +123,6 @@ func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
 		r.Unlock()
 	}
 	return w
-}
-
-func (r *Resolvers) goodDetector() bool {
-	if d := r.getDetectionResolver(); d == nil {
-		d = r.randResolver()
-		if d == nil {
-			return false
-		}
-
-		r.SetDetectionResolver(d.qps, d.address)
-		if r.detector == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
@@ -221,14 +193,14 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 		}
 	}
 	if detected {
-		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.detector.address, "*."+sub)
+		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.getDetectionResolver(sub).address, "*."+sub)
 	}
 	return detected, final
 }
 
 func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []*ExtractedAnswer {
 	ch := make(chan *dns.Msg, 1)
-	detector := r.getDetectionResolver()
+	detector := r.getDetectionResolver(name)
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
 		msg := QueryMsg(name, qtype)
@@ -241,7 +213,7 @@ loop:
 			Result: ch,
 		}
 
-		detector.query(req)
+		detector.exchange(req)
 		select {
 		case <-ctx.Done():
 			break loop
