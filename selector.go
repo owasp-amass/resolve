@@ -125,6 +125,7 @@ func (r *randomSelector) randomAvailableResolver() *resolver {
 
 		if res.last.Add(res.rate).Before(now) {
 			chosen = res
+			break
 		}
 	}
 	return chosen
