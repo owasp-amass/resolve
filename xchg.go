@@ -74,8 +74,6 @@ func initializeResolver(addr string, timeout time.Duration) *resolver {
 }
 
 func (r *resolver) exchange(req *request) {
-	r.last = time.Now()
-
 	m, rtt, err := r.xchg(req, "udp")
 	if err == nil && m.Truncated {
 		m, rtt, err = r.xchg(req, "tcp")
@@ -107,5 +105,6 @@ func (r *resolver) xchg(req *request, protocol string) (*dns.Msg, time.Duration,
 		client.UDPSize = dns.DefaultMsgSize
 	}
 
+	r.last = time.Now()
 	return client.ExchangeContext(req.Ctx, req.Msg, r.address)
 }

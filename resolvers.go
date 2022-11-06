@@ -19,7 +19,6 @@ import (
 type Resolvers struct {
 	sync.Mutex
 	done      chan struct{}
-	ticker    *time.Ticker
 	log       *log.Logger
 	servers   selector
 	wildcards map[string]*wildcard
@@ -35,7 +34,6 @@ func NewResolvers(qps int) *Resolvers {
 
 	return &Resolvers{
 		done:      make(chan struct{}, 1),
-		ticker:    time.NewTicker(time.Second / time.Duration(qps)),
 		log:       log.New(io.Discard, "", 0),
 		servers:   newRandomSelector(),
 		wildcards: make(map[string]*wildcard),
@@ -86,8 +84,6 @@ func (r *Resolvers) Stop() {
 	default:
 	}
 	close(r.done)
-
-	r.ticker.Stop()
 	r.servers.Close()
 }
 
@@ -101,7 +97,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	select {
 	case <-ctx.Done():
 	case <-r.done:
-	case <-r.ticker.C:
+	default:
 		req := reqPool.Get().(*request)
 
 		req.Ctx = ctx
