@@ -69,7 +69,7 @@ func initializeResolver(addr string, timeout time.Duration) *resolver {
 	return &resolver{
 		address: addr,
 		last:    time.Now(),
-		rate:    100 * time.Millisecond,
+		rate:    50 * time.Millisecond,
 		timeout: timeout,
 	}
 }
@@ -105,7 +105,7 @@ func (r *resolver) exchange(req *request) {
 		req.release()
 		return
 	}
-	r.setRate(rtt)
+	r.setRate(rtt / 2)
 
 	select {
 	case req.Result <- m:
