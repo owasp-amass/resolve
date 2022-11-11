@@ -44,13 +44,13 @@ func TestPoolQuery(t *testing.T) {
 
 	var failures int
 	ch := make(chan *dns.Msg, 2)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
 		if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
 			failures++
 		}
 	}
-	if failures > 50 {
+	if failures > 0 {
 		t.Errorf("too many incorrect addresses returned")
 	}
 }
@@ -111,8 +111,8 @@ func TestStopped(t *testing.T) {
 }
 
 func TestStopResolver(t *testing.T) {
-	dns.HandleFunc("timeout.org.", timeoutHandler)
-	defer dns.HandleRemove("timeout.org.")
+	dns.HandleFunc("caffix.net.", typeAHandler)
+	defer dns.HandleRemove("caffix.net.")
 
 	s, addrstr, _, err := RunLocalUDPServer(":0")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestStopResolver(t *testing.T) {
 
 	ch := make(chan *dns.Msg, 10)
 	for i := 0; i < 10; i++ {
-		r.Query(context.Background(), QueryMsg("www.timeout.org", 1), ch)
+		r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
 	}
 	for i := 0; i < 10; i++ {
 		<-ch

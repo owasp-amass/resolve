@@ -16,6 +16,9 @@ import (
 // RcodeNoResponse is a special status code used to indicate no response or package error.
 const RcodeNoResponse int = 50
 
+const lowestRate time.Duration = 2 * time.Millisecond
+const highestRate time.Duration = 100 * time.Millisecond
+
 // DefaultTimeout is the duration waited until a DNS query expires.
 const DefaultTimeout = 2 * time.Second
 
@@ -105,7 +108,14 @@ func (r *resolver) exchange(req *request) {
 		req.release()
 		return
 	}
-	r.setRate(rtt / 2)
+
+	if rate := rtt / 2; rate < lowestRate {
+		r.setRate(lowestRate)
+	} else if rate > highestRate {
+		r.setRate(highestRate)
+	} else {
+		r.setRate(rate)
+	}
 
 	select {
 	case req.Result <- m:
