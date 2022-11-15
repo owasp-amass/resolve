@@ -66,7 +66,7 @@ func (r *randomSelector) GetResolver(name string) *resolver {
 	var chosen *resolver
 
 	for chosen == nil {
-		chosen = r.randomAvailableResolver()
+		chosen = r.randomResolver()
 
 		if chosen == nil {
 			time.Sleep(10 * time.Millisecond)
@@ -109,6 +109,16 @@ func (r *randomSelector) Len() int {
 
 func (r *randomSelector) Close() {
 	r.list = nil
+}
+
+func (r *randomSelector) randomResolver() *resolver {
+	rlen := r.Len()
+	if rlen == 0 {
+		return nil
+	}
+
+	rnd := rand.Intn(rlen)
+	return r.list[rnd]
 }
 
 func (r *randomSelector) randomAvailableResolver() *resolver {
