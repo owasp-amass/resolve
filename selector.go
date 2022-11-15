@@ -113,12 +113,17 @@ func (r *randomSelector) Close() {
 
 func (r *randomSelector) randomResolver() *resolver {
 	rlen := r.Len()
-	if rlen == 0 {
-		return nil
-	}
+	now := time.Now()
 
-	rnd := rand.Intn(rlen)
-	return r.list[rnd]
+	for i := 0; i < rlen; i++ {
+		rnd := rand.Intn(rlen)
+		res := r.list[rnd]
+
+		if last, rate := res.lastAndRate(); rate < 100*time.Millisecond || last.Add(5*time.Second).Before(now) {
+			return res
+		}
+	}
+	return nil
 }
 
 func (r *randomSelector) randomAvailableResolver() *resolver {

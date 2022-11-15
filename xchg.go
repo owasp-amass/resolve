@@ -17,7 +17,7 @@ import (
 const RcodeNoResponse int = 50
 
 const lowestRate time.Duration = 2 * time.Millisecond
-const highestRate time.Duration = 100 * time.Millisecond
+const highestRate time.Duration = 250 * time.Millisecond
 
 // DefaultTimeout is the duration waited until a DNS query expires.
 const DefaultTimeout = 2 * time.Second
