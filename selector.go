@@ -66,10 +66,10 @@ func (r *randomSelector) GetResolver(name string) *resolver {
 	var chosen *resolver
 
 	for chosen == nil {
-		chosen = r.randomResolver()
+		chosen = r.randomAvailableResolver()
 
 		if chosen == nil {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
@@ -111,39 +111,19 @@ func (r *randomSelector) Close() {
 	r.list = nil
 }
 
-func (r *randomSelector) randomResolver() *resolver {
-	rlen := r.Len()
-	now := time.Now()
-
-	for i := 0; i < rlen; i++ {
-		rnd := rand.Intn(rlen)
-		res := r.list[rnd]
-
-		if last, rate := res.lastAndRate(); rate < 100*time.Millisecond || last.Add(5*time.Second).Before(now) {
-			return res
-		}
-	}
-	return nil
-}
-
 func (r *randomSelector) randomAvailableResolver() *resolver {
 	rlen := r.Len()
-	if rlen == 0 {
-		return nil
-	}
-
 	now := time.Now()
-	var chosen *resolver
+
 	for i := 0; i < rlen; i++ {
 		rnd := rand.Intn(rlen)
 		res := r.list[rnd]
 
 		if last, rate := res.lastAndRate(); last.Add(rate).Before(now) {
-			chosen = res
-			break
+			return res
 		}
 	}
-	return chosen
+	return nil
 }
 
 func min(x, y int) int {
