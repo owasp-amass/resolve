@@ -23,48 +23,8 @@ func TestSetTimeout(t *testing.T) {
 	timeout := 2 * time.Second
 	r.SetTimeout(timeout)
 
-	if r.timeout != timeout || r.list[0].xchgs.timeout != timeout {
+	if r.timeout != timeout || r.pool.GetResolver().xchgs.timeout != timeout {
 		t.Errorf("failed to set the new timeout value throughout the resolver pool")
-	}
-}
-
-func TestMin(t *testing.T) {
-	cases := []struct {
-		x    int
-		y    int
-		want int
-	}{
-		{
-			x:    4,
-			y:    5,
-			want: 4,
-		},
-		{
-			x:    4,
-			y:    4,
-			want: 4,
-		},
-		{
-			x:    0,
-			y:    4,
-			want: 0,
-		},
-		{
-			x:    1,
-			y:    0,
-			want: 0,
-		},
-		{
-			x:    10,
-			y:    4,
-			want: 4,
-		},
-	}
-
-	for _, c := range cases {
-		if m := min(c.x, c.y); m != c.want {
-			t.Errorf("min returned %d instead of the expected %d", m, c.want)
-		}
 	}
 }
 
@@ -177,31 +137,6 @@ func TestStopped(t *testing.T) {
 	}
 	// It should be safe to stop the resolver pool more than once
 	r.Stop()
-}
-
-func TestStopResolver(t *testing.T) {
-	dns.HandleFunc("timeout.org.", timeoutHandler)
-	defer dns.HandleRemove("timeout.org.")
-
-	s, addrstr, _, err := RunLocalUDPServer(":0")
-	if err != nil {
-		t.Fatalf("unable to run test server: %v", err)
-	}
-	defer func() { _ = s.Shutdown() }()
-
-	r := NewResolvers()
-	_ = r.AddResolvers(1, addrstr)
-	defer r.Stop()
-
-	r.stopResolver(1)
-	ch := make(chan *dns.Msg, 10)
-	for i := 0; i < 10; i++ {
-		r.Query(context.Background(), QueryMsg("www.timeout.org", 1), ch)
-	}
-	r.stopResolver(0)
-	for i := 0; i < 10; i++ {
-		<-ch
-	}
 }
 
 func TestQuery(t *testing.T) {
@@ -370,7 +305,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
-	res := r.searchList(addrstr)
+	res := r.pool.GetResolver()
 	res.conn.Close()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, 1))
@@ -412,7 +347,7 @@ func TestTCPExchange(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
-	res := r.searchList(addrstr)
+	res := r.pool.GetResolver()
 
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
@@ -448,7 +383,7 @@ func TestBadTCPExchange(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
-	res := r.searchList(addrstr)
+	res := r.pool.GetResolver()
 
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)

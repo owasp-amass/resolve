@@ -48,7 +48,7 @@ func (r *Resolvers) SetThresholdOptions(opt *ThresholdOptions) {
 }
 
 func (r *Resolvers) updateThresholdOptions() {
-	for _, res := range r.list {
+	for _, res := range r.pool.AllResolvers() {
 		select {
 		case <-res.done:
 		default:
@@ -79,7 +79,6 @@ func (r *Resolvers) thresholdChecks() {
 
 func (r *Resolvers) shutdownIfThresholdViolated() {
 	r.Lock()
-	list := r.list
 	opts := *r.options
 	r.Unlock()
 
@@ -88,7 +87,7 @@ func (r *Resolvers) shutdownIfThresholdViolated() {
 		return
 	}
 
-	for idx, res := range list {
+	for _, res := range r.pool.AllResolvers() {
 		var stop bool
 
 		if opts.CumulativeAccumulation && res.cumulativeThresholdReached(tv) {
@@ -97,7 +96,7 @@ func (r *Resolvers) shutdownIfThresholdViolated() {
 			stop = true
 		}
 		if stop {
-			r.stopResolver(idx)
+			res.stop()
 		}
 	}
 }

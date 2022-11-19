@@ -64,6 +64,7 @@ func TestWildcardDetected(t *testing.T) {
 		resp, err := r.QueryBlocking(context.Background(), QueryMsg(c.input, 1))
 		if err != nil {
 			t.Errorf("The query for %s failed %v", c.input, err)
+			continue
 		}
 		if got := r.WildcardDetected(context.Background(), resp, "domain.com"); got != c.want {
 			t.Errorf("Wildcard detection for %s returned %t instead of the expected %t", c.input, got, c.want)

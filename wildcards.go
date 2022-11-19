@@ -7,7 +7,6 @@ package resolve
 import (
 	"context"
 	"math/rand"
-	"net"
 	"strings"
 	"sync"
 
@@ -90,8 +89,7 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 	for i := len(labels) - base; i >= 0; i-- {
 		sub := strings.Join(labels[i:], ".")
 
-		w := r.getWildcard(ctx, sub)
-		if match := w.respMatchesWildcard(resp); match {
+		if w := r.getWildcard(ctx, sub); w.respMatchesWildcard(resp) {
 			return true
 		}
 	}
@@ -100,14 +98,12 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
 func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
-	if err := r.AddResolvers(qps, addr); err == nil {
-		if _, _, err := net.SplitHostPort(addr); err != nil {
-			// Add the default port number to the IP address
-			addr = net.JoinHostPort(addr, "53")
-		}
-		if res := r.searchListWithLock(addr); res != nil {
-			r.detector = res
-		}
+	r.Lock()
+	defer r.Unlock()
+
+	if res := r.initializeResolver(addr, qps); res != nil {
+		r.rmap[res.address] = struct{}{}
+		r.detector = res
 	}
 }
 
@@ -120,27 +116,24 @@ func (r *Resolvers) getDetectionResolver() *resolver {
 
 func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
 	r.Lock()
-	unlock := true
-
-	w := r.wildcards[sub]
-	if w == nil {
+	w, found := r.wildcards[sub]
+	if !found {
 		w = &wildcard{}
 		r.wildcards[sub] = w
+	}
+	r.Unlock()
+
+	if !found {
 		w.Lock()
-		unlock = false
-		r.Unlock() // Needs to be released for the following test
 		w.Detected, w.Answers = r.wildcardTest(ctx, sub)
 		w.Unlock()
-	}
-	if unlock {
-		r.Unlock()
 	}
 	return w
 }
 
 func (r *Resolvers) goodDetector() bool {
 	if d := r.getDetectionResolver(); d == nil {
-		d = r.randResolver()
+		d = r.pool.GetResolver()
 		if d == nil {
 			return false
 		}

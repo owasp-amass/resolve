@@ -25,7 +25,7 @@ func TestThresholdOptions(t *testing.T) {
 	})
 
 	r.Lock()
-	if r.options.ThresholdValue != threshold || r.list[0].stats.CountTimeouts != true {
+	if r.options.ThresholdValue != threshold || r.pool.GetResolver().stats.CountTimeouts != true {
 		t.Errorf("failed to set the new threshold options throughout the resolver pool")
 	}
 	r.Unlock()
@@ -36,10 +36,7 @@ func TestThresholdContinuousShutdown(t *testing.T) {
 	_ = r.AddResolvers(10, "8.8.8.8")
 	defer r.Stop()
 
-	r.Lock()
-	res := r.list[0]
-	r.Unlock()
-
+	res := r.pool.GetResolver()
 	time.Sleep(thresholdCheckInterval + time.Second)
 	select {
 	case <-res.done:
@@ -86,9 +83,7 @@ func TestThresholdCumulativeShutdown(t *testing.T) {
 		CountQueryRefusals:     true,
 	})
 
-	r.Lock()
-	res := r.list[0]
-	r.Unlock()
+	res := r.pool.GetResolver()
 
 	res.stats.Lock()
 	res.stats.Timeouts = 20
@@ -132,10 +127,7 @@ func TestCollectStats(t *testing.T) {
 		CountQueryRefusals:     true,
 	})
 
-	r.Lock()
-	res := r.list[0]
-	r.Unlock()
-
+	res := r.pool.GetResolver()
 	_, _ = r.QueryBlocking(context.Background(), QueryMsg("timeout.caffix.net", 1))
 	res.stats.Lock()
 	if res.stats.Timeouts != 1 || res.stats.LastSuccess != 1 {

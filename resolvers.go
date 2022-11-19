@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -19,21 +18,18 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const maxScanLen int = 10
-
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
 	sync.Mutex
 	done      chan struct{}
 	log       *log.Logger
-	list      []*resolver
-	rmap      map[string]int
+	pool      selector
+	rmap      map[string]struct{}
 	wildcards map[string]*wildcard
 	queue     queue.Queue
 	qps       int
 	maxSet    bool
 	rate      ratelimit.Limiter
-	scan      int
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
@@ -56,7 +52,8 @@ func NewResolvers() *Resolvers {
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
 		log:       log.New(ioutil.Discard, "", 0),
-		rmap:      make(map[string]int),
+		pool:      new(randomSelector),
+		rmap:      make(map[string]struct{}),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		timeout:   DefaultTimeout,
@@ -71,10 +68,7 @@ func NewResolvers() *Resolvers {
 
 // Len returns the number of resolvers that have been added to the pool.
 func (r *Resolvers) Len() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return len(r.list)
+	return r.pool.Len()
 }
 
 // SetLogger assigns a new logger to the resolver pool.
@@ -92,7 +86,12 @@ func (r *Resolvers) SetTimeout(d time.Duration) {
 }
 
 func (r *Resolvers) updateResolverTimeouts() {
-	for _, res := range r.list {
+	all := r.pool.AllResolvers()
+	if r.detector != nil {
+		all = append(all, r.detector)
+	}
+
+	for _, res := range all {
 		select {
 		case <-res.done:
 		default:
@@ -129,27 +128,24 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 	if qps == 0 {
 		return errors.New("failed to provide a maximum number of queries per second greater than zero")
 	}
+
 	for _, addr := range addrs {
+		if _, found := r.rmap[addr]; found {
+			continue
+		}
 		if res := r.initializeResolver(addr, qps); res != nil {
-			r.rmap[res.address] = len(r.list)
-			r.list = append(r.list, res)
+			r.rmap[addr] = struct{}{}
+			r.pool.AddResolver(res)
 			if !r.maxSet {
 				r.qps += qps
 			}
 		}
-	}
-	if l := len(r.list); l > 0 {
-		r.scan = min(l, maxScanLen)
 	}
 	return nil
 }
 
 // Stop will release resources for the resolver pool and all add resolvers.
 func (r *Resolvers) Stop() {
-	r.Lock()
-	list := r.list
-	r.Unlock()
-
 	select {
 	case <-r.done:
 		return
@@ -157,9 +153,19 @@ func (r *Resolvers) Stop() {
 	}
 
 	close(r.done)
-	for i := 0; i < len(list); i++ {
-		r.stopResolver(i)
+
+	all := r.pool.AllResolvers()
+	if d := r.getDetectionResolver(); d != nil {
+		all = append(all, d)
 	}
+
+	for _, res := range all {
+		if !r.maxSet {
+			r.qps -= res.qps
+		}
+		res.stop()
+	}
+	r.pool.Close()
 }
 
 // Query queues the provided DNS message and returns the response on the provided channel.
@@ -232,7 +238,7 @@ func (r *Resolvers) enforceMaxQPS() {
 				continue
 			}
 			if req, ok := e.(*request); ok {
-				if res := r.randResolver(); res != nil {
+				if res := r.pool.GetResolver(); res != nil {
 					res.query(req)
 					continue
 				}
@@ -258,13 +264,15 @@ func (r *Resolvers) sendQueries() {
 }
 
 func (r *Resolvers) checkAllQueues() bool {
-	r.Lock()
-	list := r.list
-	r.Unlock()
-
 	var sent bool
 	cur := time.Now()
-	for _, res := range list {
+
+	all := r.pool.AllResolvers()
+	if d := r.getDetectionResolver(); d != nil {
+		all = append(all, d)
+	}
+
+	for _, res := range all {
 		select {
 		case <-res.done:
 			continue
@@ -288,9 +296,6 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
 	}
-	if res := r.searchList(addr); res != nil {
-		return nil
-	}
 
 	var res *resolver
 	c := dns.Client{UDPSize: dns.DefaultMsgSize}
@@ -313,102 +318,25 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	return res
 }
 
-func (r *Resolvers) stopResolver(idx int) {
-	llen := r.Len()
-	if idx >= llen {
-		return
-	}
-
-	r.Lock()
-	res := r.list[idx]
-	r.Unlock()
-
+func (r *resolver) stop() {
 	select {
-	case <-res.done:
+	case <-r.done:
 		return
 	default:
 	}
 	// Send the signal to shutdown and close the connection
-	close(res.done)
-
-	if !r.maxSet {
-		r.Lock()
-		r.qps -= res.qps
-		r.Unlock()
-	}
+	close(r.done)
 	// Drains the xchgQueue of all requests
-	res.xchgQueue.Process(func(e interface{}) {
+	r.xchgQueue.Process(func(e interface{}) {
 		req := e.(*request)
 		req.errNoResponse()
 		req.release()
 	})
 	// Drain the xchgs of all messages and allow callers to return
-	for _, req := range res.xchgs.removeAll() {
+	for _, req := range r.xchgs.removeAll() {
 		req.errNoResponse()
 		req.release()
 	}
-}
-
-func (r *Resolvers) searchListWithLock(addr string) *resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.searchList(addr)
-}
-
-func (r *Resolvers) searchList(addr string) *resolver {
-	if ridx, found := r.rmap[addr]; found {
-		return r.list[ridx]
-	}
-	return nil
-}
-
-// Random selection plus short scan for the resolver with shortest queue.
-func (r *Resolvers) randResolver() *resolver {
-	var low int
-	var chosen *resolver
-loop:
-	for _, res := range r.randList() {
-		select {
-		case <-res.done:
-			continue loop
-		default:
-		}
-		if cur := res.xchgQueue.Len(); chosen == nil || cur < low {
-			chosen = res
-			low = cur
-		}
-		if low == 0 {
-			break
-		}
-	}
-	return chosen
-}
-
-func (r *Resolvers) randList() []*resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	var list []*resolver
-	if rlen := len(r.list); rlen > 0 {
-		for a, i, j := 0, 0, rand.Intn(rlen); i < rlen && a < r.scan; i, j = i+1, (j+1)%rlen {
-			select {
-			case <-r.list[j].done:
-			default:
-				list = append(list, r.list[j])
-				a++
-			}
-		}
-	}
-	return list
-}
-
-func min(x, y int) int {
-	m := x
-	if y < m {
-		m = y
-	}
-	return m
 }
 
 func (r *resolver) query(req *request) {
