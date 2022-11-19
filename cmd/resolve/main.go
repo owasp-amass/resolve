@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -26,8 +25,8 @@ import (
 
 const (
 	defaultQPS     int  = 500
-	defaultRetries int  = 5
-	defaultTimeout int  = 2000
+	defaultRetries int  = 50
+	defaultTimeout int  = 500
 	defaultQuiet   bool = false
 	defaultHelp    bool = false
 )
@@ -147,15 +146,12 @@ func (p *params) SetupFiles(lpath, opath, ipath string) error {
 
 func (p *params) SetupResolverPool(list []string, rpath string, timeout int, detector string) error {
 	p.Pool = resolve.NewResolvers()
-	if p.Pool == nil {
-		return errors.New("failed to create a new Resolvers")
-	}
 
 	// Load DNS resolvers into the pool
 	if l := len(list); l == 0 || rpath != "" {
 		list = append(list, ResolverFileList(rpath)...)
 	}
-	if err := p.Pool.AddResolvers(list...); err != nil {
+	if err := p.Pool.AddResolvers(p.QPS, list...); err != nil {
 		p.Pool.Stop()
 		return fmt.Errorf("failed to add the resolvers at a QPS of %d: %v", p.QPS, err)
 	}
@@ -169,7 +165,7 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 			p.Pool.Stop()
 			return fmt.Errorf("failed to provide a valid IP address for DNS wildcard detection: %s", detector)
 		}
-		p.Pool.SetDetectionResolver(detector)
+		p.Pool.SetDetectionResolver(p.QPS, detector)
 		p.Detection = true
 	}
 	return nil
@@ -180,7 +176,7 @@ func EventLoop(p *params) {
 	var count, persec, processing int
 	finished := queue.NewQueue()
 	responses := make(chan *dns.Msg, p.QPS*2)
-	queries := make(map[string]int, p.QPS*2)
+	queries := make(map[string]int, p.QPS)
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 
@@ -199,7 +195,7 @@ func EventLoop(p *params) {
 			if resp.Rcode == resolve.RcodeNoResponse {
 				queries[k]++
 				if queries[k] <= p.Retries {
-					go p.Pool.Query(context.Background(), resolve.QueryMsg(name, resp.Question[0].Qtype), responses)
+					p.Pool.Query(context.Background(), resolve.QueryMsg(name, resp.Question[0].Qtype), responses)
 					continue
 				}
 			} else {
@@ -240,7 +236,7 @@ func update(avg, item, n float32) float32 {
 func sendInitialRequests(ctx context.Context, name string, queries map[string]int, responses chan *dns.Msg, p *params) {
 	for _, qtype := range p.Qtypes {
 		queries[key(name, qtype)] = 1
-		go func(t uint16) { p.Pool.Query(ctx, resolve.QueryMsg(name, t), responses) }(qtype)
+		p.Pool.Query(ctx, resolve.QueryMsg(name, qtype), responses)
 	}
 }
 

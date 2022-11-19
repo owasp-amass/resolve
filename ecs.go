@@ -13,6 +13,7 @@ import (
 )
 
 // ClientSubnetCheck ensures that the provided resolver does not send the EDNS client subnet information.
+// The function returns the DNS reply size limit in number of bytes.
 func ClientSubnetCheck(resolver string) error {
 	client := dns.Client{
 		Net:     "udp",
@@ -32,7 +33,7 @@ func ClientSubnetCheck(resolver string) error {
 			err = nil
 			for _, rr := range records {
 				if strings.HasPrefix(rr.Data, "edns0-client-subnet") {
-					return fmt.Errorf("ClientSubnetCheck: The EDNS client subnet data was sent through using resolver %s: %s", resolver, rr.Data)
+					return fmt.Errorf("ClientSubnetCheck: The EDNS client subnet data was sent through using resolver %s", resolver)
 				}
 			}
 		}

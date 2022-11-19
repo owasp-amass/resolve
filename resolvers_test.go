@@ -17,14 +17,54 @@ import (
 
 func TestSetTimeout(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers("8.8.8.8")
+	_ = r.AddResolvers(1000, "8.8.8.8")
 	defer r.Stop()
 
 	timeout := 2 * time.Second
 	r.SetTimeout(timeout)
 
-	if r.timeout != timeout || r.servers.AllResolvers()[0].timeout != timeout {
+	if r.timeout != timeout || r.list[0].xchgs.timeout != timeout {
 		t.Errorf("failed to set the new timeout value throughout the resolver pool")
+	}
+}
+
+func TestMin(t *testing.T) {
+	cases := []struct {
+		x    int
+		y    int
+		want int
+	}{
+		{
+			x:    4,
+			y:    5,
+			want: 4,
+		},
+		{
+			x:    4,
+			y:    4,
+			want: 4,
+		},
+		{
+			x:    0,
+			y:    4,
+			want: 0,
+		},
+		{
+			x:    1,
+			y:    0,
+			want: 0,
+		},
+		{
+			x:    10,
+			y:    4,
+			want: 4,
+		},
+	}
+
+	for _, c := range cases {
+		if m := min(c.x, c.y); m != c.want {
+			t.Errorf("min returned %d instead of the expected %d", m, c.want)
+		}
 	}
 }
 
@@ -39,18 +79,18 @@ func TestPoolQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(100, addrstr)
 	defer r.Stop()
 
 	var failures int
 	ch := make(chan *dns.Msg, 2)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
 		if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
 			failures++
 		}
 	}
-	if failures > 0 {
+	if failures > 50 {
 		t.Errorf("too many incorrect addresses returned")
 	}
 }
@@ -63,7 +103,7 @@ func TestLen(t *testing.T) {
 		t.Errorf("the length was greater than zero before adding DNS resolvers")
 	}
 	// Test that the length equals one after adding a single resolver
-	_ = r.AddResolvers("8.8.8.8")
+	_ = r.AddResolvers(10, "8.8.8.8")
 	if r.Len() != 1 {
 		t.Errorf("the length did not equal one after adding the first resolver")
 	}
@@ -79,18 +119,47 @@ func TestAddLogger(t *testing.T) {
 	}
 }
 
+func TestQPS(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
+	// Test that the value returned by QPS equals the value of the qps field
+	if r.QPS() != r.qps {
+		t.Errorf("the value returned by QPS did not equal the qps field")
+	}
+
+	qps := 100
+	// Test that the value returned by QPS equals the qps provided
+	r.SetMaxQPS(qps)
+	if r.QPS() != qps {
+		t.Errorf("the value returned by QPS did not equal the qps provided to AddMaxQPS")
+	}
+	// A rate limiter should now be setup, since a QPS greater than zero has been provided
+	if !r.maxSet || r.rate == nil {
+		t.Errorf("the rate limiter was not setup after providing a qps greater than zero")
+	}
+	// The rate limiter should be removed once we zero out the qps
+	r.SetMaxQPS(0)
+	if r.maxSet || r.rate != nil {
+		t.Errorf("the rate limiter was not removed after providing a qps of zero")
+	}
+}
+
 func TestAddResolvers(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
-	// Test that the resolver is added
-	if err := r.AddResolvers("8.8.8.8"); err != nil || r.Len() == 0 {
-		t.Errorf("the resolver was not added")
+	// Test that resolvers are not added when a zero QPS is provided
+	if err := r.AddResolvers(0, "8.8.8.8"); err == nil || r.Len() > 0 {
+		t.Errorf("the resolver was added with a QPS of value zero")
+	}
+	// Test that the resolver is added with a QPS greater than zero
+	if err := r.AddResolvers(10, "8.8.8.8"); err != nil || r.Len() == 0 {
+		t.Errorf("the resolver was not added with a QPS greater than zero")
 	}
 }
 
 func TestStopped(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers("8.8.8.8")
+	_ = r.AddResolvers(10, "8.8.8.8")
 
 	// The resolver should not be considered stopped
 	select {
@@ -111,8 +180,8 @@ func TestStopped(t *testing.T) {
 }
 
 func TestStopResolver(t *testing.T) {
-	dns.HandleFunc("caffix.net.", typeAHandler)
-	defer dns.HandleRemove("caffix.net.")
+	dns.HandleFunc("timeout.org.", timeoutHandler)
+	defer dns.HandleRemove("timeout.org.")
 
 	s, addrstr, _, err := RunLocalUDPServer(":0")
 	if err != nil {
@@ -121,13 +190,15 @@ func TestStopResolver(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(1, addrstr)
 	defer r.Stop()
 
+	r.stopResolver(1)
 	ch := make(chan *dns.Msg, 10)
 	for i := 0; i < 10; i++ {
-		r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
+		r.Query(context.Background(), QueryMsg("www.timeout.org", 1), ch)
 	}
+	r.stopResolver(0)
 	for i := 0; i < 10; i++ {
 		<-ch
 	}
@@ -144,7 +215,7 @@ func TestQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	ch := make(chan *dns.Msg, 1)
@@ -177,7 +248,7 @@ func TestQueryChan(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	var success bool
@@ -205,7 +276,7 @@ func TestQueryBlocking(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	var success bool
@@ -230,6 +301,16 @@ func TestQueryBlocking(t *testing.T) {
 	}
 }
 
+func TestEnforceMaxQPS(t *testing.T) {
+	r := NewResolvers()
+	r.SetMaxQPS(20)
+	// The query should fail since no DNS resolver has been added to the pool
+	resp, _ := r.QueryBlocking(context.Background(), QueryMsg("caffix.net", 1))
+	if resp.Rcode != RcodeNoResponse {
+		t.Errorf("the query did not fail as expected")
+	}
+}
+
 func TestQueryTimeout(t *testing.T) {
 	dns.HandleFunc("timeout.org.", timeoutHandler)
 	defer dns.HandleRemove("timeout.org.")
@@ -241,7 +322,7 @@ func TestQueryTimeout(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
@@ -261,7 +342,7 @@ func TestEdgeCases(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
@@ -272,6 +353,29 @@ func TestEdgeCases(t *testing.T) {
 	r.Stop()
 	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", 1)); err == nil && len(ExtractAnswers(resp)) > 0 {
 		t.Errorf("query was successful when provided a stopped Resolver")
+	}
+}
+
+func TestBadWriteNextMsg(t *testing.T) {
+	name := "caffix.net."
+	dns.HandleFunc(name, typeAHandler)
+	defer dns.HandleRemove(name)
+
+	s, addrstr, _, err := RunLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	_ = r.AddResolvers(10, addrstr)
+	defer r.Stop()
+	res := r.searchList(addrstr)
+	res.conn.Close()
+
+	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, 1))
+	if err == nil && resp.Rcode != RcodeNoResponse {
+		t.Errorf("the query did not fail as expected")
 	}
 }
 
@@ -287,10 +391,97 @@ func TestTruncatedMsgs(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
+
 	// Perform the query to call the TCP exchange
 	_, _ = r.QueryBlocking(context.Background(), QueryMsg(name, 1))
+}
+
+func TestTCPExchange(t *testing.T) {
+	name := "caffix.net."
+	dns.HandleFunc(name, typeAHandler)
+	defer dns.HandleRemove(name)
+
+	s, addrstr, _, err := RunLocalTCPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	_ = r.AddResolvers(10, addrstr)
+	defer r.Stop()
+	res := r.searchList(addrstr)
+
+	ch := make(chan *dns.Msg, 2)
+	msg := QueryMsg(name, 1)
+	res.tcpExchange(&request{
+		Ctx:    context.Background(),
+		ID:     msg.Id,
+		Name:   RemoveLastDot(msg.Question[0].Name),
+		Qtype:  msg.Question[0].Qtype,
+		Msg:    msg,
+		Result: ch,
+	})
+
+	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+		if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+			t.Errorf("the query did not return the expected IP address")
+		}
+	} else {
+		t.Errorf("The TCP exchange process failed to handle the query for: %s", name)
+	}
+}
+
+func TestBadTCPExchange(t *testing.T) {
+	name := "caffix.net."
+	dns.HandleFunc(name, typeAHandler)
+	defer dns.HandleRemove(name)
+
+	s, addrstr, _, err := RunLocalUDPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	r := NewResolvers()
+	_ = r.AddResolvers(10, addrstr)
+	defer r.Stop()
+	res := r.searchList(addrstr)
+
+	ch := make(chan *dns.Msg, 2)
+	msg := QueryMsg(name, 1)
+	res.tcpExchange(&request{
+		Ctx:    context.Background(),
+		ID:     msg.Id,
+		Name:   RemoveLastDot(msg.Question[0].Name),
+		Qtype:  msg.Question[0].Qtype,
+		Msg:    msg,
+		Result: ch,
+	})
+
+	if resp := <-ch; resp.Rcode != RcodeNoResponse {
+		t.Errorf("The TCP exchange process did not fail as expected")
+	}
+}
+
+func truncatedHandler(w dns.ResponseWriter, req *dns.Msg) {
+	m := new(dns.Msg)
+	m.SetReply(req)
+
+	m.Truncated = true
+	m.Answer = make([]dns.RR, 1)
+	m.Answer[0] = &dns.A{
+		Hdr: dns.RR_Header{
+			Name:   m.Question[0].Name,
+			Rrtype: dns.TypeA,
+			Class:  dns.ClassINET,
+			Ttl:    0,
+		},
+		A: net.ParseIP("192.168.1.1"),
+	}
+	_ = w.WriteMsg(m)
 }
 
 func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {

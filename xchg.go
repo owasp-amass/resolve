@@ -6,7 +6,8 @@ package resolve
 
 import (
 	"context"
-	"net"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,11 +17,8 @@ import (
 // RcodeNoResponse is a special status code used to indicate no response or package error.
 const RcodeNoResponse int = 50
 
-const lowestRate time.Duration = 2 * time.Millisecond
-const highestRate time.Duration = 250 * time.Millisecond
-
 // DefaultTimeout is the duration waited until a DNS query expires.
-const DefaultTimeout = 2 * time.Second
+const DefaultTimeout = time.Second
 
 var reqPool = sync.Pool{
 	New: func() interface{} {
@@ -42,12 +40,7 @@ func (r *request) errNoResponse() {
 	if r.Msg != nil {
 		r.Msg.Rcode = RcodeNoResponse
 	}
-
-	select {
-	case r.Result <- r.Msg:
-	default:
-		go func(ch chan *dns.Msg) { ch <- r.Msg }(r.Result)
-	}
+	r.Result <- r.Msg
 }
 
 func (r *request) release() {
@@ -55,88 +48,97 @@ func (r *request) release() {
 	reqPool.Put(r)
 }
 
-type resolver struct {
+// The xchgMgr handles DNS message IDs and identifying messages that have timed out.
+type xchgMgr struct {
 	sync.Mutex
-	address string
-	last    time.Time
-	rate    time.Duration
 	timeout time.Duration
+	xchgs   map[string]*request
 }
 
-func initializeResolver(addr string, timeout time.Duration) *resolver {
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		// Add the default port number to the IP address
-		addr = net.JoinHostPort(addr, "53")
-	}
-
-	return &resolver{
-		address: addr,
-		last:    time.Now(),
-		rate:    50 * time.Millisecond,
-		timeout: timeout,
+func newXchgMgr(d time.Duration) *xchgMgr {
+	return &xchgMgr{
+		timeout: d,
+		xchgs:   make(map[string]*request),
 	}
 }
 
-func (r *resolver) setLast(last time.Time) {
+func xchgKey(id uint16, name string) string {
+	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
+}
+
+func (r *xchgMgr) setTimeout(d time.Duration) {
 	r.Lock()
 	defer r.Unlock()
 
-	r.last = last
+	r.timeout = d
 }
 
-func (r *resolver) setRate(rate time.Duration) {
+func (r *xchgMgr) add(req *request) error {
 	r.Lock()
 	defer r.Unlock()
 
-	r.rate = rate
-}
-
-func (r *resolver) lastAndRate() (time.Time, time.Duration) {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.last, r.rate
-}
-
-func (r *resolver) exchange(req *request) {
-	m, rtt, err := r.xchg(req, "udp")
-	if err == nil && m.Truncated {
-		m, rtt, err = r.xchg(req, "tcp")
+	key := xchgKey(req.ID, req.Name)
+	if _, found := r.xchgs[key]; found {
+		return fmt.Errorf("key %s is already in use", key)
 	}
-	if err != nil {
-		req.errNoResponse()
-		req.release()
+	r.xchgs[key] = req
+	return nil
+}
+
+func (r *xchgMgr) updateTimestamp(id uint16, name string) {
+	r.Lock()
+	defer r.Unlock()
+
+	key := xchgKey(id, name)
+	if _, found := r.xchgs[key]; !found {
 		return
 	}
-
-	if rate := rtt / 2; rate < lowestRate {
-		r.setRate(lowestRate)
-	} else if rate > highestRate {
-		r.setRate(highestRate)
-	} else {
-		r.setRate(rate)
-	}
-
-	select {
-	case req.Result <- m:
-	default:
-		go func(ch chan *dns.Msg) { ch <- m }(req.Result)
-	}
-	req.release()
+	r.xchgs[key].Timestamp = time.Now()
 }
 
-func (r *resolver) xchg(req *request, protocol string) (*dns.Msg, time.Duration, error) {
-	client := dns.Client{
-		Net:     protocol,
-		Timeout: r.timeout,
-	}
+func (r *xchgMgr) remove(id uint16, name string) *request {
+	r.Lock()
+	defer r.Unlock()
 
-	if protocol == "tcp" {
-		client.Timeout = time.Minute
-	} else {
-		client.UDPSize = dns.DefaultMsgSize
+	key := xchgKey(id, name)
+	if _, found := r.xchgs[key]; found {
+		return r.delete([]string{key})[0]
 	}
+	return nil
+}
 
-	r.setLast(time.Now())
-	return client.ExchangeContext(req.Ctx, req.Msg, r.address)
+func (r *xchgMgr) removeExpired() []*request {
+	r.Lock()
+	defer r.Unlock()
+
+	now := time.Now()
+	var keys []string
+	for key, req := range r.xchgs {
+		if !req.Timestamp.IsZero() && now.After(req.Timestamp.Add(r.timeout)) {
+			keys = append(keys, key)
+		}
+	}
+	return r.delete(keys)
+}
+
+func (r *xchgMgr) removeAll() []*request {
+	r.Lock()
+	defer r.Unlock()
+
+	var keys []string
+	for key := range r.xchgs {
+		keys = append(keys, key)
+	}
+	return r.delete(keys)
+}
+
+func (r *xchgMgr) delete(keys []string) []*request {
+	var removed []*request
+
+	for _, k := range keys {
+		removed = append(removed, r.xchgs[k])
+		r.xchgs[k] = nil
+		delete(r.xchgs, k)
+	}
+	return removed
 }

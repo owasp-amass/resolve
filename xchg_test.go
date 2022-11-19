@@ -5,127 +5,139 @@
 package resolve
 
 import (
-	"context"
-	"net"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
 )
 
-func TestExchange(t *testing.T) {
-	name := "caffix.net."
-	dns.HandleFunc(name, typeAHandler)
-	defer dns.HandleRemove(name)
-
-	s, addrstr, _, err := RunLocalUDPServer(":0")
-	if err != nil {
-		t.Fatalf("unable to run test server: %v", err)
-	}
-	defer func() { _ = s.Shutdown() }()
-
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
-	defer r.Stop()
-	res := r.servers.AllResolvers()[0]
-
-	ch := make(chan *dns.Msg, 2)
-	msg := QueryMsg(name, 1)
-	res.exchange(&request{
-		Ctx:    context.Background(),
-		ID:     msg.Id,
-		Name:   RemoveLastDot(msg.Question[0].Name),
-		Qtype:  msg.Question[0].Qtype,
-		Msg:    msg,
-		Result: ch,
-	})
-
-	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
-		if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
-			t.Errorf("the query did not return the expected IP address")
-		}
-	} else {
-		t.Errorf("The UDP exchange process failed to handle the query for: %s", name)
-	}
-}
-
-func TestTCPExchange(t *testing.T) {
-	name := "caffix.net."
-	dns.HandleFunc(name, typeAHandler)
-	defer dns.HandleRemove(name)
-
-	s, addrstr, _, err := RunLocalTCPServer(":0")
-	if err != nil {
-		t.Fatalf("unable to run test server: %v", err)
-	}
-	defer func() { _ = s.Shutdown() }()
-
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
-	defer r.Stop()
-	res := r.servers.AllResolvers()[0]
-
-	msg := QueryMsg(name, 1)
-	resp, _, err := res.xchg(&request{
-		Ctx:   context.Background(),
+func TestXchgAddRemove(t *testing.T) {
+	name := "caffix.net"
+	xchg := newXchgMgr(DefaultTimeout)
+	msg := QueryMsg(name, dns.TypeA)
+	req := &request{
 		ID:    msg.Id,
-		Name:  RemoveLastDot(msg.Question[0].Name),
-		Qtype: msg.Question[0].Qtype,
+		Name:  name,
+		Qtype: dns.TypeA,
 		Msg:   msg,
-	}, "tcp")
+	}
+	if err := xchg.add(req); err != nil {
+		t.Errorf("Failed to add the request")
+	}
+	if err := xchg.add(req); err == nil {
+		t.Errorf("Failed to detect the same request added twice")
+	}
 
-	if err == nil && resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
-		if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
-			t.Errorf("the query did not return the expected IP address")
-		}
-	} else {
-		t.Errorf("The TCP exchange process failed to handle the query for: %s", name)
+	ret := xchg.remove(msg.Id, msg.Question[0].Name)
+	if ret == nil || ret.Msg == nil || name != strings.ToLower(RemoveLastDot(ret.Msg.Question[0].Name)) {
+		t.Errorf("Did not find and remove the message from the data structure")
+	}
+	ret = xchg.remove(msg.Id, msg.Question[0].Name)
+	if ret != nil {
+		t.Errorf("Did not return nil when attempting to remove an element for the second time")
+	}
+	if err := xchg.add(req); err != nil {
+		t.Errorf("Failed to add the request after being removed")
 	}
 }
 
-func TestBadTCPExchange(t *testing.T) {
-	name := "caffix.net."
-	dns.HandleFunc(name, typeAHandler)
-	defer dns.HandleRemove(name)
+func TestXchgUpdateTimestamp(t *testing.T) {
+	name := "caffix.net"
+	xchg := newXchgMgr(DefaultTimeout)
+	msg := QueryMsg(name, dns.TypeA)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
-	if err != nil {
-		t.Fatalf("unable to run test server: %v", err)
-	}
-	defer func() { _ = s.Shutdown() }()
-
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
-	defer r.Stop()
-	res := r.servers.AllResolvers()[0]
-
-	msg := QueryMsg(name, 1)
-	resp, _, err := res.xchg(&request{
-		Ctx:   context.Background(),
+	req := &request{
 		ID:    msg.Id,
-		Name:  RemoveLastDot(msg.Question[0].Name),
-		Qtype: msg.Question[0].Qtype,
+		Name:  name,
+		Qtype: dns.TypeA,
 		Msg:   msg,
-	}, "tcp")
+	}
 
-	if err == nil && resp.Rcode != RcodeNoResponse {
-		t.Errorf("The TCP exchange process did not fail as expected")
+	if !req.Timestamp.IsZero() {
+		t.Errorf("Expected the new request to have a zero value timestamp")
+	}
+	if err := xchg.add(req); err != nil {
+		t.Errorf("Failed to add the request")
+	}
+	xchg.updateTimestamp(msg.Id, name)
+	// For complete coverage
+	xchg.updateTimestamp(msg.Id, "Bad Name")
+
+	req = xchg.remove(msg.Id, msg.Question[0].Name)
+	if req == nil || req.Timestamp.IsZero() {
+		t.Errorf("Expected the updated request to not have a zero value timestamp")
 	}
 }
 
-func truncatedHandler(w dns.ResponseWriter, req *dns.Msg) {
-	m := new(dns.Msg)
-	m.SetReply(req)
+func TestXchgRemoveExpired(t *testing.T) {
+	xchg := newXchgMgr(time.Second)
+	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
-	m.Truncated = true
-	m.Answer = make([]dns.RR, 1)
-	m.Answer[0] = &dns.A{
-		Hdr: dns.RR_Header{
-			Name:   m.Question[0].Name,
-			Rrtype: dns.TypeA,
-			Class:  dns.ClassINET,
-			Ttl:    0,
-		},
-		A: net.ParseIP("192.168.1.1"),
+	for _, name := range names {
+		msg := QueryMsg(name, dns.TypeA)
+		if err := xchg.add(&request{
+			ID:        msg.Id,
+			Name:      name,
+			Qtype:     dns.TypeA,
+			Msg:       msg,
+			Timestamp: time.Now(),
+		}); err != nil {
+			t.Errorf("Failed to add the request")
+		}
 	}
-	_ = w.WriteMsg(m)
+	// Add one request that should not be removed with the others
+	name := "vpn.caffix.net"
+	msg := QueryMsg(name, dns.TypeA)
+	if err := xchg.add(&request{
+		ID:        msg.Id,
+		Name:      name,
+		Qtype:     dns.TypeA,
+		Msg:       msg,
+		Timestamp: time.Now().Add(3 * time.Second),
+	}); err != nil {
+		t.Errorf("Failed to add the request")
+	}
+	if len(xchg.removeExpired()) > 0 {
+		t.Errorf("The removeExpired method returned requests too early")
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+	set := stringset.New(names...)
+	defer set.Close()
+
+	for _, req := range xchg.removeExpired() {
+		set.Remove(req.Name)
+	}
+	if set.Len() > 0 {
+		t.Errorf("Not all expected requests were returned by removeExpired")
+	}
+}
+
+func TestXchgRemoveAll(t *testing.T) {
+	xchg := newXchgMgr(time.Second)
+	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
+
+	for _, name := range names {
+		msg := QueryMsg(name, dns.TypeA)
+		if err := xchg.add(&request{
+			ID:    msg.Id,
+			Name:  name,
+			Qtype: dns.TypeA,
+			Msg:   msg,
+		}); err != nil {
+			t.Errorf("Failed to add the request")
+		}
+	}
+
+	set := stringset.New(names...)
+	defer set.Close()
+
+	for _, req := range xchg.removeAll() {
+		set.Remove(req.Name)
+	}
+	if set.Len() > 0 {
+		t.Errorf("Not all expected requests were returned by removeAll")
+	}
 }

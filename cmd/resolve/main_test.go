@@ -60,6 +60,11 @@ func TestObtainParams(t *testing.T) {
 			ok:       false,
 			expected: &params{},
 		}, {
+			label:    "Invalid QPS value",
+			args:     []string{"-qps", "0"},
+			ok:       false,
+			expected: &params{},
+		}, {
 			label: "Many valid arguments",
 			args:  []string{"-t", "CNAME,A,AAAA,TXT", "-c", "5", "-qps", "10", "-q", "-d", "8.8.8.8"},
 			ok:    true,
@@ -206,6 +211,8 @@ func TestSetupResolverPool(t *testing.T) {
 		ok       bool
 	}{
 		{
+			label: "Zero QPS",
+		}, {
 			label:   "Non-zero timeout",
 			qps:     1,
 			timeout: 200,
@@ -248,7 +255,7 @@ func TestEventLoop(t *testing.T) {
 		Retries: 5,
 	}
 
-	if err := p.SetupResolverPool([]string{addrstr}, "", 100, ""); err != nil {
+	if err := p.SetupResolverPool([]string{addrstr}, "", 100, addrstr); err != nil {
 		t.Fatalf("Failed to setup the resolver pool: %v", err)
 	}
 	defer p.Pool.Stop()

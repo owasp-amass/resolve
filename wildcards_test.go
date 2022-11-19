@@ -17,7 +17,7 @@ func TestSetDetectionResolver(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
 
-	r.SetDetectionResolver("8.8.8.8")
+	r.SetDetectionResolver(10, "8.8.8.8")
 	if r.detector == nil {
 		t.Errorf("failed to add the wildcard detector")
 	}
@@ -35,7 +35,7 @@ func TestWildcardDetected(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	_ = r.AddResolvers(100, addrstr)
 	defer r.Stop()
 
 	cases := []struct {
