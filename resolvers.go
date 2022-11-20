@@ -47,7 +47,7 @@ type resolver struct {
 	stats     *stats
 }
 
-// NewResolvers initializes a Resolvers that starts with the provided list of DNS resolver IP addresses.
+// NewResolvers initializes a Resolvers.
 func NewResolvers() *Resolvers {
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
@@ -60,6 +60,8 @@ func NewResolvers() *Resolvers {
 		options:   new(ThresholdOptions),
 	}
 
+	go r.responses()
+	go r.timeouts()
 	go r.enforceMaxQPS()
 	go r.sendQueries()
 	go r.thresholdChecks()
@@ -312,10 +314,66 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 			conn:      conn,
 			stats:     new(stats),
 		}
-		go res.responses()
-		go res.timeouts()
 	}
 	return res
+}
+
+func (r *Resolvers) responses() {
+	for {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		all := r.pool.AllResolvers()
+		if d := r.getDetectionResolver(); d != nil {
+			all = append(all, d)
+		}
+
+		for _, res := range all {
+			_ = res.conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+			if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+				if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+					if m.Truncated {
+						go res.tcpExchange(req)
+						continue
+					}
+					req.Result <- m
+					res.collectStats(m)
+					req.release()
+				}
+			}
+		}
+	}
+}
+
+func (r *Resolvers) timeouts() {
+	for {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		all := r.pool.AllResolvers()
+		if d := r.getDetectionResolver(); d != nil {
+			all = append(all, d)
+		}
+
+		for _, res := range all {
+			select {
+			case <-r.done:
+				return
+			default:
+				for _, req := range res.xchgs.removeExpired() {
+					req.errNoResponse()
+					res.collectStats(req.Msg)
+					req.release()
+				}
+			}
+		}
+	}
 }
 
 func (r *resolver) stop() {
@@ -337,6 +395,7 @@ func (r *resolver) stop() {
 		req.errNoResponse()
 		req.release()
 	}
+	r.conn.Close()
 }
 
 func (r *resolver) query(req *request) {
@@ -378,30 +437,6 @@ func (r *resolver) writeNextMsg() {
 	req.release()
 }
 
-func (r *resolver) responses() {
-	defer r.conn.Close()
-
-	for {
-		select {
-		case <-r.done:
-			return
-		default:
-		}
-		_ = r.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-			if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-				if m.Truncated {
-					go r.tcpExchange(req)
-					continue
-				}
-				req.Result <- m
-				r.collectStats(m)
-				req.release()
-			}
-		}
-	}
-}
-
 func (r *resolver) tcpExchange(req *request) {
 	client := dns.Client{
 		Net:     "tcp",
@@ -414,22 +449,4 @@ func (r *resolver) tcpExchange(req *request) {
 		req.errNoResponse()
 	}
 	req.release()
-}
-
-func (r *resolver) timeouts() {
-	t := time.NewTicker(100 * time.Millisecond)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-t.C:
-			for _, req := range r.xchgs.removeExpired() {
-				req.errNoResponse()
-				r.collectStats(req.Msg)
-				req.release()
-			}
-		}
-	}
 }

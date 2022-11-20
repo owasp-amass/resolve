@@ -100,6 +100,9 @@ func (r *randomSelector) Len() int {
 }
 
 func (r *randomSelector) Close() {
+	r.Lock()
+	defer r.Unlock()
+
 	r.list = nil
 }
 
