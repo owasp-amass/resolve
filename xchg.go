@@ -18,7 +18,7 @@ import (
 const RcodeNoResponse int = 50
 
 // DefaultTimeout is the duration waited until a DNS query expires.
-const DefaultTimeout = time.Second
+const DefaultTimeout = 5 * time.Second
 
 var reqPool = sync.Pool{
 	New: func() interface{} {
@@ -71,6 +71,13 @@ func (r *xchgMgr) setTimeout(d time.Duration) {
 	defer r.Unlock()
 
 	r.timeout = d
+}
+
+func (r *xchgMgr) len() int {
+	r.Lock()
+	defer r.Unlock()
+
+	return len(r.xchgs)
 }
 
 func (r *xchgMgr) add(req *request) error {

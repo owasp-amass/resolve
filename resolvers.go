@@ -18,6 +18,11 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+const (
+	numOfReaders = 10
+	readDeadline = 50 * time.Millisecond
+)
+
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
 	sync.Mutex
@@ -319,6 +324,15 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) responses() {
+	var queues []queue.Queue
+	// instantiate the readers and queues
+	for i := 0; i < numOfReaders; i++ {
+		q := queue.NewQueue()
+
+		go r.reader(q)
+		queues = append(queues, q)
+	}
+	// assign resolvers to the readers
 	for {
 		select {
 		case <-r.done:
@@ -332,13 +346,66 @@ func (r *Resolvers) responses() {
 		}
 
 		for _, res := range all {
-			_ = res.conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-			if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-				if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-					if m.Truncated {
-						go res.tcpExchange(req)
-						continue
-					}
+			select {
+			case <-res.done:
+			default:
+				if res.xchgs.len() > 0 {
+					selectQueue(queues, res)
+				}
+			}
+		}
+	}
+}
+
+func selectQueue(queues []queue.Queue, res *resolver) {
+	var chosen queue.Queue
+
+	for chosen == nil {
+		select {
+		case <-res.done:
+			return
+		default:
+		}
+
+		low := 20
+		for _, q := range queues {
+			if qlen := q.Len(); qlen < low {
+				low = qlen
+				chosen = q
+			}
+		}
+
+		if chosen == nil {
+			time.Sleep(readDeadline)
+		}
+	}
+
+	chosen.Append(res)
+}
+
+func (r *Resolvers) reader(q queue.Queue) {
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-q.Signal():
+		}
+
+		var res *resolver
+		if e, ok := q.Next(); ok {
+			if element, valid := e.(*resolver); valid {
+				res = element
+			}
+		}
+		if res == nil {
+			continue
+		}
+		_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
+		if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+			if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+				if m.Truncated {
+					go res.tcpExchange(req)
+				} else {
 					req.Result <- m
 					res.collectStats(m)
 					req.release()
