@@ -18,10 +18,7 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const (
-	numOfReaders = 10
-	readDeadline = 50 * time.Millisecond
-)
+const readDeadline = 5 * time.Millisecond
 
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
@@ -337,6 +334,7 @@ func (r *Resolvers) responses() {
 			all = append(all, d)
 		}
 
+		var found bool
 		var wg sync.WaitGroup
 		for _, res := range all {
 			select {
@@ -344,11 +342,15 @@ func (r *Resolvers) responses() {
 			default:
 				if res.xchgs.len() > 0 {
 					wg.Add(1)
+					found = true
 					go r.reader(res, &wg)
 				}
 			}
 		}
 		wg.Wait()
+		if !found {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }
 
