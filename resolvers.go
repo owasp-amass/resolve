@@ -467,6 +467,9 @@ func (r *resolver) writeNextMsg() {
 			if r.conn.WriteMsg(req.Msg) == nil {
 				// Update the time for the next query to be sent
 				r.next = r.next.Add(r.inc)
+				if now := time.Now(); r.next.Before(now) {
+					r.next = now
+				}
 				return
 			} else {
 				_ = r.xchgs.remove(req.ID, req.Name)
