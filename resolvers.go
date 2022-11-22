@@ -324,14 +324,6 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) responses() {
-	var queues []queue.Queue
-	// instantiate the readers and queues
-	for i := 0; i < numOfReaders; i++ {
-		q := queue.NewQueue()
-
-		go r.reader(q)
-		queues = append(queues, q)
-	}
 	// assign resolvers to the readers
 	for {
 		select {
@@ -345,79 +337,41 @@ func (r *Resolvers) responses() {
 			all = append(all, d)
 		}
 
+		var wg sync.WaitGroup
 		for _, res := range all {
 			select {
 			case <-res.done:
 			default:
 				if res.xchgs.len() > 0 {
-					r.selectQueue(queues, res)
+					wg.Add(1)
+					go r.reader(res, &wg)
 				}
 			}
 		}
+		wg.Wait()
 	}
 }
 
-func (r *Resolvers) selectQueue(queues []queue.Queue, res *resolver) {
-	var chosen queue.Queue
+func (r *Resolvers) reader(res *resolver, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	for chosen == nil {
-		select {
-		case <-r.done:
-			return
-		case <-res.done:
-			return
-		default:
-		}
-
-		low := 3
-		for _, q := range queues {
-			if qlen := q.Len(); qlen < low {
-				low = qlen
-				chosen = q
-			}
-		}
-
-		if chosen == nil {
-			time.Sleep(time.Duration(low) * readDeadline)
-		}
+	select {
+	case <-r.done:
+		return
+	case <-res.done:
+		return
+	default:
 	}
 
-	chosen.Append(res)
-}
-
-func (r *Resolvers) reader(q queue.Queue) {
-loop:
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-q.Signal():
-		}
-
-		var res *resolver
-		if e, ok := q.Next(); ok {
-			if element, valid := e.(*resolver); valid {
-				res = element
-			}
-		}
-		if res == nil {
-			continue
-		}
-		select {
-		case <-res.done:
-			continue loop
-		default:
-		}
-		_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
-		if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-			if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-				if m.Truncated {
-					go res.tcpExchange(req)
-				} else {
-					req.Result <- m
-					res.collectStats(m)
-					req.release()
-				}
+	_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
+	if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+		if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+			if m.Truncated {
+				go res.tcpExchange(req)
+			} else {
+				req.Result <- m
+				res.collectStats(m)
+				req.release()
 			}
 		}
 	}
