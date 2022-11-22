@@ -404,6 +404,11 @@ func (r *Resolvers) timeouts() {
 				}
 			}
 		}
+		// wait a bit before checking again
+		r.Lock()
+		d := r.timeout / 2
+		r.Unlock()
+		time.Sleep(d)
 	}
 }
 
