@@ -39,7 +39,7 @@ func TestPoolQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(250, addrstr)
+	_ = r.AddResolvers(100, addrstr)
 	defer r.Stop()
 
 	num := 1000

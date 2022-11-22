@@ -350,24 +350,26 @@ func (r *Resolvers) responses() {
 			case <-res.done:
 			default:
 				if res.xchgs.len() > 0 {
-					selectQueue(queues, res)
+					r.selectQueue(queues, res)
 				}
 			}
 		}
 	}
 }
 
-func selectQueue(queues []queue.Queue, res *resolver) {
+func (r *Resolvers) selectQueue(queues []queue.Queue, res *resolver) {
 	var chosen queue.Queue
 
 	for chosen == nil {
 		select {
+		case <-r.done:
+			return
 		case <-res.done:
 			return
 		default:
 		}
 
-		low := 20
+		low := 3
 		for _, q := range queues {
 			if qlen := q.Len(); qlen < low {
 				low = qlen
@@ -376,7 +378,7 @@ func selectQueue(queues []queue.Queue, res *resolver) {
 		}
 
 		if chosen == nil {
-			time.Sleep(readDeadline)
+			time.Sleep(time.Duration(low) * readDeadline)
 		}
 	}
 
@@ -384,6 +386,7 @@ func selectQueue(queues []queue.Queue, res *resolver) {
 }
 
 func (r *Resolvers) reader(q queue.Queue) {
+loop:
 	for {
 		select {
 		case <-r.done:
@@ -399,6 +402,11 @@ func (r *Resolvers) reader(q queue.Queue) {
 		}
 		if res == nil {
 			continue
+		}
+		select {
+		case <-res.done:
+			continue loop
+		default:
 		}
 		_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
 		if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
@@ -492,12 +500,16 @@ func (r *resolver) writeNextMsg() {
 	select {
 	case <-req.Ctx.Done():
 	default:
-		if err := r.conn.WriteMsg(req.Msg); err == nil && r.xchgs.add(req) == nil {
+		if r.xchgs.add(req) == nil {
 			// Set the timestamp for message expiration
 			r.xchgs.updateTimestamp(req.ID, req.Name)
-			// Update the time for the next query to be sent
-			r.next = time.Now().Add(r.inc)
-			return
+			if r.conn.WriteMsg(req.Msg) == nil {
+				// Update the time for the next query to be sent
+				r.next = r.next.Add(r.inc)
+				return
+			} else {
+				_ = r.xchgs.remove(req.ID, req.Name)
+			}
 		}
 	}
 	req.errNoResponse()
