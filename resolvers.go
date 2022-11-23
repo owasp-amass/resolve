@@ -36,6 +36,7 @@ type Resolvers struct {
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
+	maxReads  int
 }
 
 type resolver struct {
@@ -61,6 +62,7 @@ func NewResolvers() *Resolvers {
 		queue:     queue.NewQueue(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
+		maxReads:  runtime.NumCPU() * 10,
 	}
 
 	go r.responses()
@@ -322,7 +324,6 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) responses() {
-	maxReads := runtime.NumCPU() * 10
 	// assign resolvers to the readers
 	for {
 		select {
@@ -343,14 +344,14 @@ func (r *Resolvers) responses() {
 			select {
 			case <-res.done:
 			default:
-				if num := res.xchgs.len(); num > 0 {
+				if res.xchgs.len() > 0 {
 					wg.Add(1)
 					count++
 					found = true
-					go r.reader(res, num, &wg)
+					go r.reader(res, &wg)
 				}
 			}
-			if count >= maxReads {
+			if count >= r.maxReads {
 				wg.Wait()
 				count = 0
 			}
@@ -362,27 +363,25 @@ func (r *Resolvers) responses() {
 	}
 }
 
-func (r *Resolvers) reader(res *resolver, num int, wg *sync.WaitGroup) {
+func (r *Resolvers) reader(res *resolver, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for i := 0; i < num; i++ {
-		select {
-		case <-r.done:
-			return
-		case <-res.done:
-			return
-		default:
-		}
-		_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
-		if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-			if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-				if m.Truncated {
-					go res.tcpExchange(req)
-				} else {
-					req.Result <- m
-					res.collectStats(m)
-					req.release()
-				}
+	select {
+	case <-r.done:
+		return
+	case <-res.done:
+		return
+	default:
+	}
+	_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
+	if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+		if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+			if m.Truncated {
+				go res.tcpExchange(req)
+			} else {
+				req.Result <- m
+				res.collectStats(m)
+				req.release()
 			}
 		}
 	}
