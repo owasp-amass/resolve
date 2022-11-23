@@ -129,7 +129,7 @@ func (r *xchgMgr) removeExpired() []*request {
 	now := time.Now()
 	var keys []string
 	for key, req := range r.xchgs {
-		if !req.Timestamp.IsZero() && now.After(r.lastRead) && now.After(req.Timestamp.Add(r.timeout)) {
+		if !req.Timestamp.IsZero() && r.lastRead.After(req.Timestamp) && now.After(req.Timestamp.Add(r.timeout)) {
 			keys = append(keys, key)
 		}
 	}
