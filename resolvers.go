@@ -322,7 +322,7 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 }
 
 func (r *Resolvers) responses() {
-	maxReads := runtime.NumCPU()
+	maxReads := runtime.NumCPU() * 100
 	// assign resolvers to the readers
 	for {
 		select {
@@ -365,23 +365,25 @@ func (r *Resolvers) responses() {
 func (r *Resolvers) reader(res *resolver, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	select {
-	case <-r.done:
-		return
-	case <-res.done:
-		return
-	default:
-	}
-
-	_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
-	if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-		if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-			if m.Truncated {
-				go res.tcpExchange(req)
-			} else {
-				req.Result <- m
-				res.collectStats(m)
-				req.release()
+	rlen := res.xchgs.len()
+	for i := 0; i < rlen; i++ {
+		select {
+		case <-r.done:
+			return
+		case <-res.done:
+			return
+		default:
+		}
+		_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
+		if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+			if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+				if m.Truncated {
+					go res.tcpExchange(req)
+				} else {
+					req.Result <- m
+					res.collectStats(m)
+					req.release()
+				}
 			}
 		}
 	}
@@ -470,9 +472,9 @@ func (r *resolver) writeNextMsg() {
 	case <-req.Ctx.Done():
 	default:
 		if r.xchgs.add(req) == nil {
-			// Set the timestamp for message expiration
-			r.xchgs.updateTimestamp(req.ID, req.Name)
 			if r.conn.WriteMsg(req.Msg) == nil {
+				// Set the timestamp for message expiration
+				r.xchgs.updateTimestamp(req.ID, req.Name)
 				// Update the time for the next query to be sent
 				r.next = r.next.Add(r.inc)
 				if now := time.Now(); r.next.Before(now) {
