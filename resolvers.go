@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"runtime"
 	"sync"
 	"time"
 
@@ -62,7 +61,7 @@ func NewResolvers() *Resolvers {
 		queue:     queue.NewQueue(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
-		maxReads:  runtime.NumCPU() * 10,
+		maxReads:  1000,
 	}
 
 	go r.responses()
