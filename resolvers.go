@@ -144,6 +144,7 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 			r.pool.AddResolver(res)
 			if !r.maxSet {
 				r.qps += qps
+				r.rate = ratelimit.New(r.qps)
 			}
 		}
 	}
@@ -236,7 +237,7 @@ func (r *Resolvers) enforceMaxQPS() {
 		case <-r.done:
 			return
 		case <-r.queue.Signal():
-			if r.maxSet {
+			if r.rate != nil {
 				r.rate.Take()
 			}
 			e, ok := r.queue.Next()
