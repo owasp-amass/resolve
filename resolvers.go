@@ -334,7 +334,6 @@ func (r *resolver) responses() {
 }
 
 func (r *resolver) read() {
-	_ = r.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
 		if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
 			if m.Truncated {
