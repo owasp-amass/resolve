@@ -305,7 +305,8 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	var res *resolver
 	c := dns.Client{UDPSize: dns.DefaultMsgSize}
 	if conn, err := c.Dial(addr); err == nil {
-		_ = conn.SetDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Time{})
+		_ = conn.SetWriteDeadline(time.Time{})
 		res = &resolver{
 			done:      make(chan struct{}, 1),
 			xchgQueue: queue.NewQueue(),
@@ -334,7 +335,6 @@ func (r *resolver) responses() {
 }
 
 func (r *resolver) read() {
-	_ = r.conn.SetReadDeadline(time.Time{})
 	if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
 		if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
 			if m.Truncated {
@@ -431,9 +431,10 @@ func (r *resolver) writeNextMsg() {
 	case <-req.Ctx.Done():
 	default:
 		if r.xchgs.add(req) == nil {
+			// Set the timestamp for message expiration
+			r.xchgs.updateTimestamp(req.ID, req.Name)
+
 			if r.conn.WriteMsg(req.Msg) == nil {
-				// Set the timestamp for message expiration
-				r.xchgs.updateTimestamp(req.ID, req.Name)
 				// Update the time for the next query to be sent
 				r.next = r.next.Add(r.inc)
 				if now := time.Now(); r.next.Before(now) {

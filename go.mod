@@ -1,6 +1,6 @@
 module github.com/caffix/resolve
 
-go 1.18
+go 1.19
 
 require (
 	github.com/caffix/queue v0.1.4-0.20221117050542-621305ceff1f
