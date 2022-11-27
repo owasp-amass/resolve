@@ -106,7 +106,6 @@ func TestXchgRemoveExpired(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 	set := stringset.New(names...)
 	defer set.Close()
-	xchg.last()
 
 	for _, req := range xchg.removeExpired() {
 		set.Remove(req.Name)

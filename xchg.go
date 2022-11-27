@@ -51,9 +51,8 @@ func (r *request) release() {
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.
 type xchgMgr struct {
 	sync.Mutex
-	timeout  time.Duration
-	lastRead time.Time
-	xchgs    map[string]*request
+	timeout time.Duration
+	xchgs   map[string]*request
 }
 
 func newXchgMgr(d time.Duration) *xchgMgr {
@@ -72,20 +71,6 @@ func (r *xchgMgr) setTimeout(d time.Duration) {
 	defer r.Unlock()
 
 	r.timeout = d
-}
-
-func (r *xchgMgr) last() {
-	r.Lock()
-	defer r.Unlock()
-
-	r.lastRead = time.Now()
-}
-
-func (r *xchgMgr) len() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return len(r.xchgs)
 }
 
 func (r *xchgMgr) add(req *request) error {
@@ -129,7 +114,7 @@ func (r *xchgMgr) removeExpired() []*request {
 	now := time.Now()
 	var keys []string
 	for key, req := range r.xchgs {
-		if !req.Timestamp.IsZero() && r.lastRead.After(req.Timestamp) && now.After(req.Timestamp.Add(r.timeout)) {
+		if !req.Timestamp.IsZero() && now.After(req.Timestamp.Add(r.timeout)) {
 			keys = append(keys, key)
 		}
 	}

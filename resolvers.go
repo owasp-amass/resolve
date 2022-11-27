@@ -18,8 +18,6 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const readDeadline = 50 * time.Millisecond
-
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
 	sync.Mutex
@@ -35,7 +33,6 @@ type Resolvers struct {
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
-	maxReads  int
 }
 
 type resolver struct {
@@ -61,10 +58,8 @@ func NewResolvers() *Resolvers {
 		queue:     queue.NewQueue(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
-		maxReads:  1000,
 	}
 
-	go r.responses()
 	go r.timeouts()
 	go r.enforceMaxQPS()
 	go r.sendQueries()
@@ -144,9 +139,12 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 			r.pool.AddResolver(res)
 			if !r.maxSet {
 				r.qps += qps
-				r.rate = ratelimit.New(r.qps)
 			}
 		}
+	}
+	// create the new rate limiter for the updated QPS
+	if !r.maxSet {
+		r.rate = ratelimit.New(r.qps)
 	}
 	return nil
 }
@@ -319,73 +317,35 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 			conn:      conn,
 			stats:     new(stats),
 		}
+		go res.responses()
 	}
 	return res
 }
 
-func (r *Resolvers) responses() {
-	// assign resolvers to the readers
+func (r *resolver) responses() {
 	for {
 		select {
 		case <-r.done:
 			return
 		default:
 		}
-
-		all := r.pool.AllResolvers()
-		if d := r.getDetectionResolver(); d != nil {
-			all = append(all, d)
-		}
-
-		var count int
-		var found bool
-		var wg sync.WaitGroup
-		for _, res := range all {
-			select {
-			case <-res.done:
-			default:
-				if res.xchgs.len() > 0 {
-					wg.Add(1)
-					count++
-					found = true
-					go r.reader(res, &wg)
-				}
-			}
-			if count >= r.maxReads {
-				wg.Wait()
-				count = 0
-			}
-		}
-		wg.Wait()
-		if !found {
-			time.Sleep(100 * time.Millisecond)
-		}
+		r.read()
 	}
 }
 
-func (r *Resolvers) reader(res *resolver, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	select {
-	case <-r.done:
-		return
-	case <-res.done:
-		return
-	default:
-	}
-	_ = res.conn.SetReadDeadline(time.Now().Add(readDeadline))
-	if m, err := res.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-		if req := res.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
+func (r *resolver) read() {
+	_ = r.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
+		if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
 			if m.Truncated {
-				go res.tcpExchange(req)
+				go r.tcpExchange(req)
 			} else {
 				req.Result <- m
-				res.collectStats(m)
+				r.collectStats(m)
 				req.release()
 			}
 		}
 	}
-	res.xchgs.last()
 }
 
 func (r *Resolvers) timeouts() {
