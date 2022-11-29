@@ -398,7 +398,8 @@ func (r *Resolvers) writeMsg(req *request) {
 	}
 
 	conn := r.conns.Next()
-	if _, err := conn.WriteToUDP(out, res.address); err != nil {
+	conn.SetWriteDeadline(now.Add(500 * time.Millisecond))
+	if n, err := conn.WriteToUDP(out, res.address); err != nil || n < len(out) {
 		_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
 		req.errNoResponse()
 		req.release()

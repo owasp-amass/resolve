@@ -5,38 +5,51 @@
 package resolve
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/miekg/dns"
 )
 
-// ClientSubnetCheck ensures that the provided resolver does not send the EDNS client subnet information.
-// The function returns the DNS reply size limit in number of bytes.
-func ClientSubnetCheck(resolver string) error {
-	client := dns.Client{
-		Net:     "udp",
-		UDPSize: dns.DefaultMsgSize,
-		Timeout: 2 * time.Second,
+// ClientSubnetCheck ensures that all the resolvers in the pool respond to the query
+// and do not send the EDNS client subnet information.
+func (r *Resolvers) ClientSubnetCheck() {
+	all := r.pool.AllResolvers()
+	ch := make(chan *dns.Msg, 100)
+	msgsToRes := make(map[string]*resolver)
+
+	for _, res := range all {
+		msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
+		msgsToRes[xchgKey(msg.Id, msg.Question[0].Name)] = res
+		r.writeMsg(&request{
+			Res:    res,
+			Msg:    msg,
+			Result: ch,
+		})
 	}
 
-	msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
-	resp, _, err := client.Exchange(msg, resolver)
-	if err != nil || (!resp.Authoritative && !resp.RecursionAvailable) {
-		return fmt.Errorf("ClientSubnetCheck: Failed to query 'o-o.myaddr.l.google.com' using the resolver at %s: %v", resolver, err)
-	}
+	alen := len(all)
+	for i := 0; i < alen; i++ {
+		resp := <-ch
+		var failed bool
 
-	err = fmt.Errorf("ClientSubnetCheck: No answers returned from 'o-o.myaddr.l.google.com' using the resolver at %s", resolver)
-	if ans := ExtractAnswers(resp); len(ans) > 0 {
-		if records := AnswersByType(ans, dns.TypeTXT); len(records) > 0 {
-			err = nil
-			for _, rr := range records {
-				if strings.HasPrefix(rr.Data, "edns0-client-subnet") {
-					return fmt.Errorf("ClientSubnetCheck: The EDNS client subnet data was sent through using resolver %s", resolver)
+		if resp.Rcode != dns.RcodeSuccess || (!resp.Authoritative && !resp.RecursionAvailable) {
+			failed = true
+		}
+		if ans := ExtractAnswers(resp); !failed && len(ans) > 0 {
+			if records := AnswersByType(ans, dns.TypeTXT); !failed && len(records) > 0 {
+				for _, rr := range records {
+					if strings.HasPrefix(rr.Data, "edns0-client-subnet") {
+						failed = true
+					}
 				}
+			} else {
+				failed = true
 			}
+		} else {
+			failed = true
+		}
+		if res := msgsToRes[xchgKey(resp.Id, resp.Question[0].Name)]; res != nil && failed {
+			res.stop()
 		}
 	}
-	return err
 }
