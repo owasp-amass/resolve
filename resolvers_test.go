@@ -32,7 +32,7 @@ func TestPoolQuery(t *testing.T) {
 	dns.HandleFunc("pool.net.", typeAHandler)
 	defer dns.HandleRemove("pool.net.")
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestQuery(t *testing.T) {
 	dns.HandleFunc("caffix.net.", typeAHandler)
 	defer dns.HandleRemove("caffix.net.")
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestQueryChan(t *testing.T) {
 	dns.HandleFunc("caffix.net.", typeAHandler)
 	defer dns.HandleRemove("caffix.net.")
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestQueryBlocking(t *testing.T) {
 	dns.HandleFunc(name, typeAHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestQueryTimeout(t *testing.T) {
 	dns.HandleFunc("timeout.org.", timeoutHandler)
 	defer dns.HandleRemove("timeout.org.")
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestEdgeCases(t *testing.T) {
 	dns.HandleFunc("google.com.", typeAHandler)
 	defer dns.HandleRemove("google.com.")
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	dns.HandleFunc(name, typeAHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -308,8 +308,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
-	res := r.pool.GetResolver()
-	res.conn.Close()
+	r.conn.Close()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, 1))
 	if err == nil && resp.Rcode != RcodeNoResponse {
@@ -322,7 +321,7 @@ func TestTruncatedMsgs(t *testing.T) {
 	dns.HandleFunc(name, truncatedHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -341,7 +340,7 @@ func TestTCPExchange(t *testing.T) {
 	dns.HandleFunc(name, typeAHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalTCPServer(":0")
+	s, addrstr, _, err := RunLocalTCPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -355,10 +354,7 @@ func TestTCPExchange(t *testing.T) {
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
 	res.tcpExchange(&request{
-		Ctx:    context.Background(),
-		ID:     msg.Id,
-		Name:   RemoveLastDot(msg.Question[0].Name),
-		Qtype:  msg.Question[0].Qtype,
+		Res:    res,
 		Msg:    msg,
 		Result: ch,
 	})
@@ -377,7 +373,7 @@ func TestBadTCPExchange(t *testing.T) {
 	dns.HandleFunc(name, typeAHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}
@@ -391,10 +387,7 @@ func TestBadTCPExchange(t *testing.T) {
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
 	res.tcpExchange(&request{
-		Ctx:    context.Background(),
-		ID:     msg.Id,
-		Name:   RemoveLastDot(msg.Question[0].Name),
-		Qtype:  msg.Question[0].Qtype,
+		Res:    res,
 		Msg:    msg,
 		Result: ch,
 	})

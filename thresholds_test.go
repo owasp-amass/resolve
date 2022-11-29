@@ -107,7 +107,7 @@ func TestCollectStats(t *testing.T) {
 	dns.HandleFunc(name, statsHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("unable to run test server: %v", err)
 	}

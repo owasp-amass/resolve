@@ -13,6 +13,9 @@ type selector interface {
 	// GetResolver returns a resolver managed by the selector.
 	GetResolver() *resolver
 
+	// LookupResolver returns the resolver with the matching address.
+	LookupResolver(addr string) *resolver
+
 	// AddResolver adds a resolver to the selector pool.
 	AddResolver(res *resolver)
 
@@ -28,7 +31,12 @@ type selector interface {
 
 type randomSelector struct {
 	sync.Mutex
-	list []*resolver
+	list   []*resolver
+	lookup map[string]*resolver
+}
+
+func newRandomSelector() *randomSelector {
+	return &randomSelector{lookup: make(map[string]*resolver)}
 }
 
 // GetResolver performs random selection on the pool of resolvers.
@@ -42,7 +50,7 @@ loop:
 			continue loop
 		default:
 		}
-		if cur := res.xchgQueue.Len(); chosen == nil || cur < low {
+		if cur := res.xchgs.len(); chosen == nil || cur < low {
 			chosen = res
 			low = cur
 		}
@@ -75,11 +83,23 @@ func (r *randomSelector) randList() []*resolver {
 	return list
 }
 
+func (r *randomSelector) LookupResolver(addr string) *resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.lookup[addr]
+}
+
 func (r *randomSelector) AddResolver(res *resolver) {
 	r.Lock()
 	defer r.Unlock()
 
+	if _, found := r.lookup[res.address.IP.String()]; found {
+		return
+	}
+
 	r.list = append(r.list, res)
+	r.lookup[res.address.IP.String()] = res
 }
 
 func (r *randomSelector) AllResolvers() []*resolver {
@@ -104,6 +124,7 @@ func (r *randomSelector) Close() {
 	defer r.Unlock()
 
 	r.list = nil
+	r.lookup = nil
 }
 
 func min(x, y int) int {

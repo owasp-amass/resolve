@@ -7,6 +7,7 @@ package resolve
 import (
 	"context"
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
 
@@ -101,8 +102,22 @@ func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
 	r.Lock()
 	defer r.Unlock()
 
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		// add the default port number to the IP address
+		addr = net.JoinHostPort(addr, "53")
+	}
+	// check that this address will not create a duplicate resolver
+	uaddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return
+	}
+	if _, found := r.rmap[uaddr.IP.String()]; found {
+		r.detector = r.pool.LookupResolver(uaddr.IP.String())
+		return
+	}
 	if res := r.initializeResolver(addr, qps); res != nil {
-		r.rmap[res.address] = struct{}{}
+		r.rmap[res.address.IP.String()] = struct{}{}
+		r.pool.AddResolver(res)
 		r.detector = res
 	}
 }
@@ -112,6 +127,21 @@ func (r *Resolvers) getDetectionResolver() *resolver {
 	defer r.Unlock()
 
 	return r.detector
+}
+
+func (r *Resolvers) goodDetector() bool {
+	if d := r.getDetectionResolver(); d == nil {
+		d = r.pool.GetResolver()
+		if d == nil {
+			return false
+		}
+
+		r.SetDetectionResolver(d.qps, d.address.String())
+		if r.detector == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
@@ -129,21 +159,6 @@ func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
 		w.Unlock()
 	}
 	return w
-}
-
-func (r *Resolvers) goodDetector() bool {
-	if d := r.getDetectionResolver(); d == nil {
-		d = r.pool.GetResolver()
-		if d == nil {
-			return false
-		}
-
-		r.SetDetectionResolver(d.qps, d.address)
-		if r.detector == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
@@ -224,17 +239,13 @@ func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype ui
 	detector := r.getDetectionResolver()
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
-		msg := QueryMsg(name, qtype)
 		req := &request{
-			Ctx:    ctx,
-			ID:     msg.Id,
-			Name:   RemoveLastDot(msg.Question[0].Name),
-			Qtype:  msg.Question[0].Qtype,
-			Msg:    msg,
+			Res:    detector,
+			Msg:    QueryMsg(name, qtype),
 			Result: ch,
 		}
 
-		detector.query(req)
+		r.writeMsg(req)
 		select {
 		case <-ctx.Done():
 			break loop

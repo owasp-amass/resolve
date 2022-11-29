@@ -5,7 +5,6 @@
 package resolve
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,12 +26,9 @@ var reqPool = sync.Pool{
 }
 
 type request struct {
-	Ctx       context.Context
-	ID        uint16
+	Res       *resolver
 	Timestamp time.Time
-	Name      string
-	Qtype     uint16
-	Msg       *dns.Msg
+	Msg, Resp *dns.Msg
 	Result    chan *dns.Msg
 }
 
@@ -66,6 +62,13 @@ func xchgKey(id uint16, name string) string {
 	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
 }
 
+func (r *xchgMgr) len() int {
+	r.Lock()
+	defer r.Unlock()
+
+	return len(r.xchgs)
+}
+
 func (r *xchgMgr) setTimeout(d time.Duration) {
 	r.Lock()
 	defer r.Unlock()
@@ -77,7 +80,7 @@ func (r *xchgMgr) add(req *request) error {
 	r.Lock()
 	defer r.Unlock()
 
-	key := xchgKey(req.ID, req.Name)
+	key := xchgKey(req.Msg.Id, req.Msg.Question[0].Name)
 	if _, found := r.xchgs[key]; found {
 		return fmt.Errorf("key %s is already in use", key)
 	}

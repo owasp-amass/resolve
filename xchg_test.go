@@ -17,12 +17,7 @@ func TestXchgAddRemove(t *testing.T) {
 	name := "caffix.net"
 	xchg := newXchgMgr(DefaultTimeout)
 	msg := QueryMsg(name, dns.TypeA)
-	req := &request{
-		ID:    msg.Id,
-		Name:  name,
-		Qtype: dns.TypeA,
-		Msg:   msg,
-	}
+	req := &request{Msg: msg}
 	if err := xchg.add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
@@ -47,13 +42,7 @@ func TestXchgUpdateTimestamp(t *testing.T) {
 	name := "caffix.net"
 	xchg := newXchgMgr(DefaultTimeout)
 	msg := QueryMsg(name, dns.TypeA)
-
-	req := &request{
-		ID:    msg.Id,
-		Name:  name,
-		Qtype: dns.TypeA,
-		Msg:   msg,
-	}
+	req := &request{Msg: msg}
 
 	if !req.Timestamp.IsZero() {
 		t.Errorf("Expected the new request to have a zero value timestamp")
@@ -78,9 +67,6 @@ func TestXchgRemoveExpired(t *testing.T) {
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
 		if err := xchg.add(&request{
-			ID:        msg.Id,
-			Name:      name,
-			Qtype:     dns.TypeA,
 			Msg:       msg,
 			Timestamp: time.Now(),
 		}); err != nil {
@@ -91,9 +77,6 @@ func TestXchgRemoveExpired(t *testing.T) {
 	name := "vpn.caffix.net"
 	msg := QueryMsg(name, dns.TypeA)
 	if err := xchg.add(&request{
-		ID:        msg.Id,
-		Name:      name,
-		Qtype:     dns.TypeA,
 		Msg:       msg,
 		Timestamp: time.Now().Add(3 * time.Second),
 	}); err != nil {
@@ -108,7 +91,9 @@ func TestXchgRemoveExpired(t *testing.T) {
 	defer set.Close()
 
 	for _, req := range xchg.removeExpired() {
-		set.Remove(req.Name)
+		name := strings.ToLower(RemoveLastDot(req.Msg.Question[0].Name))
+
+		set.Remove(name)
 	}
 	if set.Len() > 0 {
 		t.Errorf("Not all expected requests were returned by removeExpired")
@@ -121,12 +106,7 @@ func TestXchgRemoveAll(t *testing.T) {
 
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
-		if err := xchg.add(&request{
-			ID:    msg.Id,
-			Name:  name,
-			Qtype: dns.TypeA,
-			Msg:   msg,
-		}); err != nil {
+		if err := xchg.add(&request{Msg: msg}); err != nil {
 			t.Errorf("Failed to add the request")
 		}
 	}
@@ -135,7 +115,9 @@ func TestXchgRemoveAll(t *testing.T) {
 	defer set.Close()
 
 	for _, req := range xchg.removeAll() {
-		set.Remove(req.Name)
+		name := strings.ToLower(RemoveLastDot(req.Msg.Question[0].Name))
+
+		set.Remove(name)
 	}
 	if set.Len() > 0 {
 		t.Errorf("Not all expected requests were returned by removeAll")

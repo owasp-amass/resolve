@@ -18,15 +18,19 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+const headerSize = 12
+
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
 	sync.Mutex
 	done      chan struct{}
 	log       *log.Logger
+	conn      *net.UDPConn
 	pool      selector
 	rmap      map[string]struct{}
 	wildcards map[string]*wildcard
 	queue     queue.Queue
+	resps     queue.Queue
 	qps       int
 	maxSet    bool
 	rate      ratelimit.Limiter
@@ -36,33 +40,50 @@ type Resolvers struct {
 }
 
 type resolver struct {
-	done      chan struct{}
-	xchgQueue queue.Queue
-	xchgs     *xchgMgr
-	address   string
-	qps       int
-	inc       time.Duration
-	next      time.Time
-	conn      *dns.Conn
-	stats     *stats
+	done    chan struct{}
+	xchgs   *xchgMgr
+	address *net.UDPAddr
+	qps     int
+	stats   *stats
 }
 
 // NewResolvers initializes a Resolvers.
 func NewResolvers() *Resolvers {
+	addr, err := net.ResolveUDPAddr("udp", ":0")
+	if err != nil {
+		return nil
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return nil
+	}
+	err = conn.SetReadBuffer(4 * 1024 * 1024)
+	if err != nil {
+		return nil
+	}
+	err = conn.SetWriteBuffer(4 * 1024 * 1024)
+	if err != nil {
+		return nil
+	}
+
+	_ = conn.SetDeadline(time.Time{})
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
 		log:       log.New(ioutil.Discard, "", 0),
-		pool:      new(randomSelector),
+		conn:      conn,
+		pool:      newRandomSelector(),
 		rmap:      make(map[string]struct{}),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
+		resps:     queue.NewQueue(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
 
+	go r.responses()
+	go r.processResponses()
 	go r.timeouts()
 	go r.enforceMaxQPS()
-	go r.sendQueries()
 	go r.thresholdChecks()
 	return r
 }
@@ -131,11 +152,20 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 	}
 
 	for _, addr := range addrs {
-		if _, found := r.rmap[addr]; found {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			// add the default port number to the IP address
+			addr = net.JoinHostPort(addr, "53")
+		}
+		// check that this address will not create a duplicate resolver
+		uaddr, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			continue
+		}
+		if _, found := r.rmap[uaddr.IP.String()]; found {
 			continue
 		}
 		if res := r.initializeResolver(addr, qps); res != nil {
-			r.rmap[addr] = struct{}{}
+			r.rmap[res.address.IP.String()] = struct{}{}
 			r.pool.AddResolver(res)
 			if !r.maxSet {
 				r.qps += qps
@@ -156,8 +186,8 @@ func (r *Resolvers) Stop() {
 		return
 	default:
 	}
-
 	close(r.done)
+	r.conn.Close()
 
 	all := r.pool.AllResolvers()
 	if d := r.getDetectionResolver(); d != nil {
@@ -186,10 +216,6 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	default:
 		req := reqPool.Get().(*request)
 
-		req.Ctx = ctx
-		req.ID = msg.Id
-		req.Name = RemoveLastDot(msg.Question[0].Name)
-		req.Qtype = msg.Question[0].Qtype
 		req.Msg = msg
 		req.Result = ch
 		r.queue.Append(req)
@@ -244,7 +270,8 @@ func (r *Resolvers) enforceMaxQPS() {
 			}
 			if req, ok := e.(*request); ok {
 				if res := r.pool.GetResolver(); res != nil {
-					res.query(req)
+					req.Res = res
+					r.writeMsg(req)
 					continue
 				}
 				req.errNoResponse()
@@ -254,94 +281,92 @@ func (r *Resolvers) enforceMaxQPS() {
 	}
 }
 
-func (r *Resolvers) sendQueries() {
-	for {
-		select {
-		case <-r.done:
-			return
-		default:
-		}
-
-		if !r.checkAllQueues() {
-			time.Sleep(time.Millisecond)
-		}
-	}
-}
-
-func (r *Resolvers) checkAllQueues() bool {
-	var sent bool
-	cur := time.Now()
-
-	all := r.pool.AllResolvers()
-	if d := r.getDetectionResolver(); d != nil {
-		all = append(all, d)
-	}
-
-	for _, res := range all {
-		select {
-		case <-res.done:
-			continue
-		default:
-		}
-		if res.next.After(cur) {
-			continue
-		}
-		select {
-		case <-res.xchgQueue.Signal():
-			res.writeNextMsg()
-			sent = true
-		default:
-		}
-	}
-	return sent
-}
-
 func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
 	}
 
-	var res *resolver
-	c := dns.Client{UDPSize: dns.DefaultMsgSize}
-	if conn, err := c.Dial(addr); err == nil {
-		_ = conn.SetReadDeadline(time.Time{})
-		_ = conn.SetWriteDeadline(time.Time{})
-		res = &resolver{
-			done:      make(chan struct{}, 1),
-			xchgQueue: queue.NewQueue(),
-			xchgs:     newXchgMgr(r.timeout),
-			address:   addr,
-			qps:       qps,
-			inc:       time.Second / time.Duration(qps),
-			next:      time.Now(),
-			conn:      conn,
-			stats:     new(stats),
-		}
-		go res.responses()
+	uaddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil
 	}
-	return res
+
+	return &resolver{
+		done:    make(chan struct{}, 1),
+		xchgs:   newXchgMgr(r.timeout),
+		address: uaddr,
+		qps:     qps,
+		stats:   new(stats),
+	}
 }
 
-func (r *resolver) responses() {
+type resp struct {
+	Msg  *dns.Msg
+	Addr *net.UDPAddr
+}
+
+func (r *Resolvers) responses() {
+	b := make([]byte, dns.DefaultMsgSize)
+
 	for {
 		select {
 		case <-r.done:
 			return
 		default:
 		}
-		r.read()
+		if n, addr, err := r.conn.ReadFromUDP(b); err == nil && n >= headerSize {
+			m := new(dns.Msg)
+
+			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
+				r.resps.Append(&resp{
+					Msg:  m,
+					Addr: addr,
+				})
+			}
+		}
 	}
 }
 
-func (r *resolver) read() {
-	if m, err := r.conn.ReadMsg(); err == nil && m != nil && len(m.Question) > 0 {
-		if req := r.xchgs.remove(m.Id, m.Question[0].Name); req != nil {
-			if m.Truncated {
-				go r.tcpExchange(req)
+func (r *Resolvers) processResponses() {
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-r.resps.Signal():
+		}
+
+		var response *resp
+		if element, ok := r.resps.Next(); ok {
+			if r, valid := element.(*resp); valid {
+				response = r
+			}
+		}
+		if response == nil {
+			continue
+		}
+
+		var res *resolver
+		addr := response.Addr.IP.String()
+		if res = r.pool.LookupResolver(addr); res == nil {
+			detector := r.getDetectionResolver()
+
+			if addr == detector.address.IP.String() {
+				res = detector
+			}
+		}
+		if res == nil {
+			continue
+		}
+
+		msg := response.Msg
+		if req := res.xchgs.remove(msg.Id, msg.Question[0].Name); req != nil {
+			req.Resp = msg
+			if req.Resp.Truncated {
+				go req.Res.tcpExchange(req)
 			} else {
-				req.Result <- m
-				r.collectStats(m)
+				req.Result <- req.Resp
+				req.Res.collectStats(req.Resp)
 				req.release()
 			}
 		}
@@ -389,65 +414,38 @@ func (r *resolver) stop() {
 	}
 	// Send the signal to shutdown and close the connection
 	close(r.done)
-	// Drains the xchgQueue of all requests
-	r.xchgQueue.Process(func(e interface{}) {
-		req := e.(*request)
-		req.errNoResponse()
-		req.release()
-	})
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range r.xchgs.removeAll() {
 		req.errNoResponse()
 		req.release()
 	}
-	r.conn.Close()
 }
 
-func (r *resolver) query(req *request) {
-	select {
-	case <-r.done:
-	default:
-		r.xchgQueue.Append(req)
-		return
-	}
-	req.errNoResponse()
-	req.release()
-}
-
-func (r *resolver) writeNextMsg() {
+func (r *Resolvers) writeMsg(req *request) {
 	select {
 	case <-r.done:
 		return
 	default:
 	}
+	res := req.Res
 
-	element, ok := r.xchgQueue.Next()
-	if !ok {
+	out, err := req.Msg.Pack()
+	if err != nil {
 		return
 	}
-	req := element.(*request)
 
-	select {
-	case <-req.Ctx.Done():
-	default:
-		if r.xchgs.add(req) == nil {
-			// Set the timestamp for message expiration
-			r.xchgs.updateTimestamp(req.ID, req.Name)
-
-			if r.conn.WriteMsg(req.Msg) == nil {
-				// Update the time for the next query to be sent
-				r.next = r.next.Add(r.inc)
-				if now := time.Now(); r.next.Before(now) {
-					r.next = now
-				}
-				return
-			} else {
-				_ = r.xchgs.remove(req.ID, req.Name)
-			}
-		}
+	now := time.Now()
+	// Set the timestamp for message expiration
+	req.Timestamp = now
+	if res.xchgs.add(req) != nil {
+		return
 	}
-	req.errNoResponse()
-	req.release()
+
+	if _, err := r.conn.WriteToUDP(out, res.address); err != nil {
+		_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
+		req.errNoResponse()
+		req.release()
+	}
 }
 
 func (r *resolver) tcpExchange(req *request) {
@@ -455,7 +453,7 @@ func (r *resolver) tcpExchange(req *request) {
 		Net:     "tcp",
 		Timeout: time.Minute,
 	}
-	if m, _, err := client.Exchange(req.Msg, r.address); err == nil {
+	if m, _, err := client.Exchange(req.Msg, r.address.String()); err == nil {
 		req.Result <- m
 		r.collectStats(m)
 	} else {

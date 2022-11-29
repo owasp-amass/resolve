@@ -109,7 +109,7 @@ func TestNsecTraversal(t *testing.T) {
 	dns.HandleFunc(name, walkHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestBadNsecTraversal(t *testing.T) {
 	dns.HandleFunc(name, noNSECHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}

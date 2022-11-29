@@ -28,7 +28,7 @@ func TestWildcardDetected(t *testing.T) {
 	dns.HandleFunc(name, wildcardHandler)
 	defer dns.HandleRemove(name)
 
-	s, addrstr, _, err := RunLocalUDPServer(":0")
+	s, addrstr, _, err := RunLocalUDPServer("localhost:0")
 	if err != nil {
 		t.Fatalf("Unable to run test server: %v", err)
 	}
