@@ -308,7 +308,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
-	r.conn.Close()
+	r.conns.Close()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, 1))
 	if err == nil && resp.Rcode != RcodeNoResponse {

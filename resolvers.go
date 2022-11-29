@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -25,7 +26,7 @@ type Resolvers struct {
 	sync.Mutex
 	done      chan struct{}
 	log       *log.Logger
-	conn      *net.UDPConn
+	conns     *connections
 	pool      selector
 	rmap      map[string]struct{}
 	wildcards map[string]*wildcard
@@ -49,38 +50,20 @@ type resolver struct {
 
 // NewResolvers initializes a Resolvers.
 func NewResolvers() *Resolvers {
-	addr, err := net.ResolveUDPAddr("udp", ":0")
-	if err != nil {
-		return nil
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return nil
-	}
-	err = conn.SetReadBuffer(4 * 1024 * 1024)
-	if err != nil {
-		return nil
-	}
-	err = conn.SetWriteBuffer(4 * 1024 * 1024)
-	if err != nil {
-		return nil
-	}
-
-	_ = conn.SetDeadline(time.Time{})
+	responses := queue.NewQueue()
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
 		log:       log.New(ioutil.Discard, "", 0),
-		conn:      conn,
+		conns:     newConnections(runtime.NumCPU(), responses),
 		pool:      newRandomSelector(),
 		rmap:      make(map[string]struct{}),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
-		resps:     queue.NewQueue(),
+		resps:     responses,
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
 
-	go r.responses()
 	go r.processResponses()
 	go r.timeouts()
 	go r.enforceMaxQPS()
@@ -187,7 +170,7 @@ func (r *Resolvers) Stop() {
 	default:
 	}
 	close(r.done)
-	r.conn.Close()
+	r.conns.Close()
 
 	all := r.pool.AllResolvers()
 	if d := r.getDetectionResolver(); d != nil {
@@ -298,33 +281,6 @@ func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
 		address: uaddr,
 		qps:     qps,
 		stats:   new(stats),
-	}
-}
-
-type resp struct {
-	Msg  *dns.Msg
-	Addr *net.UDPAddr
-}
-
-func (r *Resolvers) responses() {
-	b := make([]byte, dns.DefaultMsgSize)
-
-	for {
-		select {
-		case <-r.done:
-			return
-		default:
-		}
-		if n, addr, err := r.conn.ReadFromUDP(b); err == nil && n >= headerSize {
-			m := new(dns.Msg)
-
-			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
-				r.resps.Append(&resp{
-					Msg:  m,
-					Addr: addr,
-				})
-			}
-		}
 	}
 }
 
@@ -441,7 +397,8 @@ func (r *Resolvers) writeMsg(req *request) {
 		return
 	}
 
-	if _, err := r.conn.WriteToUDP(out, res.address); err != nil {
+	conn := r.conns.Next()
+	if _, err := conn.WriteToUDP(out, res.address); err != nil {
 		_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
 		req.errNoResponse()
 		req.release()
