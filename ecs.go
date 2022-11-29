@@ -14,7 +14,8 @@ import (
 // and do not send the EDNS client subnet information.
 func (r *Resolvers) ClientSubnetCheck() {
 	all := r.pool.AllResolvers()
-	ch := make(chan *dns.Msg, 100)
+	alen := len(all)
+	ch := make(chan *dns.Msg, alen)
 	msgsToRes := make(map[string]*resolver)
 
 	for _, res := range all {
@@ -27,7 +28,6 @@ func (r *Resolvers) ClientSubnetCheck() {
 		})
 	}
 
-	alen := len(all)
 	for i := 0; i < alen; i++ {
 		resp := <-ch
 		var failed bool
