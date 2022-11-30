@@ -106,17 +106,30 @@ func (r *randomSelector) AllResolvers() []*resolver {
 	r.Lock()
 	defer r.Unlock()
 
-	dst := make([]*resolver, len(r.list))
-	copy(dst, r.list)
-	return dst
+	var active []*resolver
+	for _, res := range r.list {
+		select {
+		case <-res.done:
+		default:
+			active = append(active, res)
+		}
+	}
+	return active
 }
 
-// Len returns the number of resolvers that have been added to the pool.
 func (r *randomSelector) Len() int {
 	r.Lock()
 	defer r.Unlock()
 
-	return len(r.list)
+	var count int
+	for _, res := range r.list {
+		select {
+		case <-res.done:
+		default:
+			count++
+		}
+	}
+	return count
 }
 
 func (r *randomSelector) Close() {

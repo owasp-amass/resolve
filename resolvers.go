@@ -7,7 +7,7 @@ package resolve
 import (
 	"context"
 	"errors"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"runtime"
@@ -53,7 +53,7 @@ func NewResolvers() *Resolvers {
 	responses := queue.NewQueue()
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
-		log:       log.New(ioutil.Discard, "", 0),
+		log:       log.New(io.Discard, "", 0),
 		conns:     newConnections(runtime.NumCPU(), responses),
 		pool:      newRandomSelector(),
 		rmap:      make(map[string]struct{}),
