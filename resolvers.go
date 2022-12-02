@@ -35,6 +35,7 @@ type Resolvers struct {
 	qps       int
 	maxSet    bool
 	rate      ratelimit.Limiter
+	servRates *serversRateLimiter
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
@@ -46,6 +47,41 @@ type resolver struct {
 	address *net.UDPAddr
 	qps     int
 	stats   *stats
+}
+
+func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		// Add the default port number to the IP address
+		addr = net.JoinHostPort(addr, "53")
+	}
+
+	uaddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil
+	}
+
+	return &resolver{
+		done:    make(chan struct{}, 1),
+		xchgs:   newXchgMgr(r.timeout),
+		address: uaddr,
+		qps:     qps,
+		stats:   new(stats),
+	}
+}
+
+func (r *resolver) stop() {
+	select {
+	case <-r.done:
+		return
+	default:
+	}
+	// Send the signal to shutdown and close the connection
+	close(r.done)
+	// Drain the xchgs of all messages and allow callers to return
+	for _, req := range r.xchgs.removeAll() {
+		req.errNoResponse()
+		req.release()
+	}
 }
 
 // NewResolvers initializes a Resolvers.
@@ -60,6 +96,7 @@ func NewResolvers() *Resolvers {
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		resps:     responses,
+		servRates: newServersRateLimiter(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
@@ -201,6 +238,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 
 		req.Msg = msg
 		req.Result = ch
+		r.servRates.Take(RemoveLastDot(msg.Question[0].Name))
 		r.queue.Append(req)
 		return
 	}
@@ -239,49 +277,37 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 }
 
 func (r *Resolvers) enforceMaxQPS() {
+loop:
 	for {
 		select {
 		case <-r.done:
-			return
+			break loop
 		case <-r.queue.Signal():
 			if r.rate != nil {
 				r.rate.Take()
 			}
 			e, ok := r.queue.Next()
 			if !ok {
-				continue
+				continue loop
 			}
 			if req, ok := e.(*request); ok {
 				if res := r.pool.GetResolver(); res != nil {
 					req.Res = res
 					r.writeMsg(req)
-					continue
+					continue loop
 				}
 				req.errNoResponse()
 				req.release()
 			}
 		}
 	}
-}
-
-func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		// Add the default port number to the IP address
-		addr = net.JoinHostPort(addr, "53")
-	}
-
-	uaddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil
-	}
-
-	return &resolver{
-		done:    make(chan struct{}, 1),
-		xchgs:   newXchgMgr(r.timeout),
-		address: uaddr,
-		qps:     qps,
-		stats:   new(stats),
-	}
+	// release the requests remaining on the queue
+	r.queue.Process(func(element interface{}) {
+		if req, ok := element.(request); ok {
+			req.errNoResponse()
+			req.release()
+		}
+	})
 }
 
 func (r *Resolvers) processResponses() {
@@ -362,27 +388,7 @@ func (r *Resolvers) timeouts() {
 	}
 }
 
-func (r *resolver) stop() {
-	select {
-	case <-r.done:
-		return
-	default:
-	}
-	// Send the signal to shutdown and close the connection
-	close(r.done)
-	// Drain the xchgs of all messages and allow callers to return
-	for _, req := range r.xchgs.removeAll() {
-		req.errNoResponse()
-		req.release()
-	}
-}
-
 func (r *Resolvers) writeMsg(req *request) {
-	select {
-	case <-r.done:
-		return
-	default:
-	}
 	res := req.Res
 
 	out, err := req.Msg.Pack()

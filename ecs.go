@@ -28,13 +28,35 @@ func (r *Resolvers) ClientSubnetCheck() {
 		})
 	}
 
+	retries := make(map[string]struct{})
 	for i := 0; i < alen; i++ {
 		resp := <-ch
 		var failed bool
-
+		// pull the resolver associated with this message
+		key := xchgKey(resp.Id, resp.Question[0].Name)
+		res, found := msgsToRes[key]
+		if !found {
+			continue
+		}
+		delete(msgsToRes, key)
+		// give resolvers one additional chance to respond
+		if _, already := retries[res.address.IP.String()]; !already && resp.Rcode == RcodeNoResponse {
+			i--
+			retries[res.address.IP.String()] = struct{}{}
+			msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
+			msgsToRes[xchgKey(msg.Id, msg.Question[0].Name)] = res
+			r.writeMsg(&request{
+				Res:    res,
+				Msg:    msg,
+				Result: ch,
+			})
+			continue
+		}
+		// check if the resolver responded, but did not return a successful response
 		if resp.Rcode != dns.RcodeSuccess || (!resp.Authoritative && !resp.RecursionAvailable) {
 			failed = true
 		}
+		// check if the response included the expected record
 		if ans := ExtractAnswers(resp); !failed && len(ans) > 0 {
 			if records := AnswersByType(ans, dns.TypeTXT); !failed && len(records) > 0 {
 				for _, rr := range records {
@@ -48,7 +70,8 @@ func (r *Resolvers) ClientSubnetCheck() {
 		} else {
 			failed = true
 		}
-		if res := msgsToRes[xchgKey(resp.Id, resp.Question[0].Name)]; res != nil && failed {
+		// discontinue usage of the resolver when the check fails
+		if res != nil && failed {
 			res.stop()
 		}
 	}
