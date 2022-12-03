@@ -16,6 +16,7 @@ import (
 
 const (
 	maxQPSPerNameserver = 100
+	successesToRaiseQPS = 5
 	rateUpdateInterval  = 3 * time.Second
 )
 
@@ -123,8 +124,13 @@ func (rt *rateTrack) update() {
 	}
 	// a good number of successes are necessary to warrant an increase
 	if !updated && rt.success > 0 {
-		rt.qps += rt.success / 10
-		updated = true
+		if inc := rt.success / successesToRaiseQPS; inc > 0 {
+			rt.qps += inc
+			updated = true
+		} else if inc == 0 && rt.qps <= successesToRaiseQPS {
+			rt.qps++
+			updated = true
+		}
 	}
 
 	if updated {
