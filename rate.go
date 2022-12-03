@@ -83,7 +83,7 @@ func (r *serversRateLimiter) success(sub string) {
 }
 
 func (r *serversRateLimiter) updateRateLimiters() {
-	t := time.NewTicker(rateUpdateInterval)
+	t := time.NewTimer(rateUpdateInterval)
 	defer t.Stop()
 
 	for {
@@ -92,6 +92,7 @@ func (r *serversRateLimiter) updateRateLimiters() {
 			return
 		case <-t.C:
 			r.updateAllRateLimiters()
+			t.Reset(rateUpdateInterval)
 		}
 	}
 }
