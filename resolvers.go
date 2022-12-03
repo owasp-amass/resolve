@@ -207,6 +207,7 @@ func (r *Resolvers) Stop() {
 	default:
 	}
 	close(r.done)
+	close(r.servRates.done)
 	r.conns.Close()
 
 	all := r.pool.AllResolvers()
@@ -342,13 +343,15 @@ func (r *Resolvers) processResponses() {
 		}
 
 		msg := response.Msg
-		if req := res.xchgs.remove(msg.Id, msg.Question[0].Name); req != nil {
+		name := msg.Question[0].Name
+		if req := res.xchgs.remove(msg.Id, name); req != nil {
 			req.Resp = msg
 			if req.Resp.Truncated {
 				go req.Res.tcpExchange(req)
 			} else {
 				req.Result <- req.Resp
 				req.Res.collectStats(req.Resp)
+				r.servRates.ReportSuccess(name)
 				req.release()
 			}
 		}
@@ -376,6 +379,7 @@ func (r *Resolvers) timeouts() {
 				for _, req := range res.xchgs.removeExpired() {
 					req.errNoResponse()
 					res.collectStats(req.Msg)
+					r.servRates.ReportTimeout(req.Msg.Question[0].Name)
 					req.release()
 				}
 			}

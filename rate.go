@@ -14,33 +14,136 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-const maxQPSPerNameserver = 100
+const (
+	maxQPSPerNameserver = 100
+	rateUpdateInterval  = 3 * time.Second
+)
+
+type rateTrack struct {
+	sync.Mutex
+	qps     int
+	rate    ratelimit.Limiter
+	success int
+	timeout int
+}
 
 type serversRateLimiter struct {
 	sync.Mutex
+	done            chan struct{}
 	domainToServers map[string][]string
-	serverToLimiter map[string]ratelimit.Limiter
-	catchLimiter    ratelimit.Limiter
+	serverToLimiter map[string]*rateTrack
+	catchLimiter    *rateTrack
 }
 
 func newServersRateLimiter() *serversRateLimiter {
-	return &serversRateLimiter{
+	r := &serversRateLimiter{
+		done:            make(chan struct{}, 1),
 		domainToServers: make(map[string][]string),
-		serverToLimiter: make(map[string]ratelimit.Limiter),
-		catchLimiter:    ratelimit.New(maxQPSPerNameserver),
+		serverToLimiter: make(map[string]*rateTrack),
+		catchLimiter:    newRateTracker(),
+	}
+
+	go r.updateRateLimiters()
+	return r
+}
+
+func newRateTracker() *rateTrack {
+	return &rateTrack{
+		qps:  maxQPSPerNameserver,
+		rate: ratelimit.New(maxQPSPerNameserver),
 	}
 }
 
 func (r *serversRateLimiter) Take(sub string) {
+	tracker := r.getDomainRateTracker(sub)
+
+	tracker.Lock()
+	rate := tracker.rate
+	tracker.Unlock()
+
+	rate.Take()
+}
+
+func (r *serversRateLimiter) ReportTimeout(sub string) {
+	tracker := r.getDomainRateTracker(sub)
+
+	tracker.Lock()
+	tracker.timeout++
+	tracker.Unlock()
+}
+
+func (r *serversRateLimiter) ReportSuccess(sub string) {
+	tracker := r.getDomainRateTracker(sub)
+
+	tracker.Lock()
+	tracker.success++
+	tracker.Unlock()
+}
+
+func (r *serversRateLimiter) updateRateLimiters() {
+	t := time.NewTicker(rateUpdateInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-t.C:
+			r.updateAllRateLimiters()
+		}
+	}
+}
+
+func (r *serversRateLimiter) updateAllRateLimiters() {
 	r.Lock()
 	defer r.Unlock()
 
-	domain, err := publicsuffix.EffectiveTLDPlusOne(sub)
-	if err != nil {
-		r.catchLimiter.Take()
+	r.catchLimiter.update()
+	for _, rt := range r.serverToLimiter {
+		rt.update()
+	}
+}
+
+func (rt *rateTrack) update() {
+	rt.Lock()
+	defer rt.Unlock()
+	// check if this rate tracker has already been updated
+	if rt.success == 0 && rt.timeout == 0 {
 		return
 	}
-	domain = RemoveLastDot(domain)
+
+	var updated bool
+	// any timeouts indicate a need to slow down
+	if rt.timeout > 0 {
+		rt.qps -= rt.timeout
+		if rt.qps <= 0 {
+			rt.qps = 1
+		}
+		updated = true
+	}
+	// a good number of successes are necessary to warrant an increase
+	if !updated && rt.success > 0 {
+		rt.qps += rt.success / 10
+		updated = true
+	}
+
+	if updated {
+		rt.rate = ratelimit.New(rt.qps)
+	}
+	rt.success = 0
+	rt.timeout = 0
+}
+
+func (r *serversRateLimiter) getDomainRateTracker(sub string) *rateTrack {
+	r.Lock()
+	defer r.Unlock()
+
+	n := strings.ToLower(RemoveLastDot(sub))
+	domain, err := publicsuffix.EffectiveTLDPlusOne(n)
+	if err != nil {
+		return r.catchLimiter
+	}
+	domain = strings.ToLower(RemoveLastDot(domain))
 
 	servers, found := r.domainToServers[domain]
 	if !found {
@@ -49,27 +152,27 @@ func (r *serversRateLimiter) Take(sub string) {
 	}
 
 	if len(servers) == 0 {
-		r.catchLimiter.Take()
-		return
+		return r.catchLimiter
 	}
 
-	var limiter ratelimit.Limiter
+	var tracker *rateTrack
 	// check if we already have a rate limiter for these servers
 	for _, name := range servers {
-		if l, found := r.serverToLimiter[name]; found {
-			limiter = l
+		if rt, found := r.serverToLimiter[name]; found {
+			tracker = rt
 			break
 		}
 	}
-	if limiter == nil {
-		limiter = ratelimit.New(maxQPSPerNameserver)
+	if tracker == nil {
+		tracker = newRateTracker()
 	}
-	// make sure all the server are using the same rate limiter
+	// make sure all the servers are using the same rate limiter
 	for _, name := range servers {
-		r.serverToLimiter[name] = limiter
+		if _, found := r.serverToLimiter[name]; !found {
+			r.serverToLimiter[name] = tracker
+		}
 	}
-
-	limiter.Take()
+	return tracker
 }
 
 func (r *serversRateLimiter) getNameservers(domain string) []string {
