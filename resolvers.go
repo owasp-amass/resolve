@@ -239,7 +239,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 
 		req.Msg = msg
 		req.Result = ch
-		r.servRates.Take(RemoveLastDot(msg.Question[0].Name))
+		r.servRates.take(msg.Question[0].Name)
 		r.queue.Append(req)
 		return
 	}
@@ -351,7 +351,7 @@ func (r *Resolvers) processResponses() {
 			} else {
 				req.Result <- req.Resp
 				req.Res.collectStats(req.Resp)
-				r.servRates.ReportSuccess(name)
+				r.servRates.success(name)
 				req.release()
 			}
 		}
@@ -379,7 +379,7 @@ func (r *Resolvers) timeouts() {
 				for _, req := range res.xchgs.removeExpired() {
 					req.errNoResponse()
 					res.collectStats(req.Msg)
-					r.servRates.ReportTimeout(req.Msg.Question[0].Name)
+					r.servRates.timeout(req.Msg.Question[0].Name)
 					req.release()
 				}
 			}

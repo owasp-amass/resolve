@@ -17,7 +17,8 @@ import (
 const (
 	maxQPSPerNameserver = 100
 	successesToRaiseQPS = 5
-	rateUpdateInterval  = 3 * time.Second
+	numIntervalSeconds  = 3
+	rateUpdateInterval  = numIntervalSeconds * time.Second
 )
 
 type rateTrack struct {
@@ -55,7 +56,7 @@ func newRateTracker() *rateTrack {
 	}
 }
 
-func (r *serversRateLimiter) Take(sub string) {
+func (r *serversRateLimiter) take(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -65,7 +66,7 @@ func (r *serversRateLimiter) Take(sub string) {
 	rate.Take()
 }
 
-func (r *serversRateLimiter) ReportTimeout(sub string) {
+func (r *serversRateLimiter) timeout(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -73,7 +74,7 @@ func (r *serversRateLimiter) ReportTimeout(sub string) {
 	tracker.Unlock()
 }
 
-func (r *serversRateLimiter) ReportSuccess(sub string) {
+func (r *serversRateLimiter) success(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -114,9 +115,9 @@ func (rt *rateTrack) update() {
 	}
 
 	var updated bool
-	// any timeouts indicate a need to slow down
-	if rt.timeout > 0 {
-		rt.qps -= rt.timeout
+	// timeouts in excess of 5% indicate a need to slow down
+	if float64(rt.timeout)/float64(rt.success+rt.timeout) > 0.05 {
+		rt.qps--
 		if rt.qps <= 0 {
 			rt.qps = 1
 		}
@@ -124,10 +125,12 @@ func (rt *rateTrack) update() {
 	}
 	// a good number of successes are necessary to warrant an increase
 	if !updated && rt.success > 0 {
-		if inc := rt.success / successesToRaiseQPS; inc > 0 {
-			rt.qps += inc
-			updated = true
-		} else if inc == 0 && rt.qps <= successesToRaiseQPS {
+		if blocks := rt.success / successesToRaiseQPS; blocks > 0 {
+			if inc := blocks / numIntervalSeconds; inc > 0 {
+				rt.qps += inc
+				updated = true
+			}
+		} else if blocks == 0 && rt.qps <= successesToRaiseQPS {
 			rt.qps++
 			updated = true
 		}
