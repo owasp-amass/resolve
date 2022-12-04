@@ -29,7 +29,7 @@ type rateTrack struct {
 	timeout int
 }
 
-type serversRateLimiter struct {
+type RateTracker struct {
 	sync.Mutex
 	done            chan struct{}
 	domainToServers map[string][]string
@@ -37,26 +37,26 @@ type serversRateLimiter struct {
 	catchLimiter    *rateTrack
 }
 
-func newServersRateLimiter() *serversRateLimiter {
-	r := &serversRateLimiter{
+func NewRateTracker() *RateTracker {
+	r := &RateTracker{
 		done:            make(chan struct{}, 1),
 		domainToServers: make(map[string][]string),
 		serverToLimiter: make(map[string]*rateTrack),
-		catchLimiter:    newRateTracker(),
+		catchLimiter:    newRateTrack(),
 	}
 
 	go r.updateRateLimiters()
 	return r
 }
 
-func newRateTracker() *rateTrack {
+func newRateTrack() *rateTrack {
 	return &rateTrack{
 		qps:  maxQPSPerNameserver,
 		rate: ratelimit.New(maxQPSPerNameserver),
 	}
 }
 
-func (r *serversRateLimiter) take(sub string) {
+func (r *RateTracker) take(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -66,7 +66,7 @@ func (r *serversRateLimiter) take(sub string) {
 	rate.Take()
 }
 
-func (r *serversRateLimiter) timeout(sub string) {
+func (r *RateTracker) timeout(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -74,7 +74,7 @@ func (r *serversRateLimiter) timeout(sub string) {
 	tracker.Unlock()
 }
 
-func (r *serversRateLimiter) success(sub string) {
+func (r *RateTracker) success(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -82,7 +82,7 @@ func (r *serversRateLimiter) success(sub string) {
 	tracker.Unlock()
 }
 
-func (r *serversRateLimiter) updateRateLimiters() {
+func (r *RateTracker) updateRateLimiters() {
 	t := time.NewTimer(rateUpdateInterval)
 	defer t.Stop()
 
@@ -97,7 +97,7 @@ func (r *serversRateLimiter) updateRateLimiters() {
 	}
 }
 
-func (r *serversRateLimiter) updateAllRateLimiters() {
+func (r *RateTracker) updateAllRateLimiters() {
 	r.Lock()
 	defer r.Unlock()
 
@@ -144,7 +144,7 @@ func (rt *rateTrack) update() {
 	rt.timeout = 0
 }
 
-func (r *serversRateLimiter) getDomainRateTracker(sub string) *rateTrack {
+func (r *RateTracker) getDomainRateTracker(sub string) *rateTrack {
 	r.Lock()
 	defer r.Unlock()
 
@@ -174,7 +174,7 @@ func (r *serversRateLimiter) getDomainRateTracker(sub string) *rateTrack {
 		}
 	}
 	if tracker == nil {
-		tracker = newRateTracker()
+		tracker = newRateTrack()
 	}
 	// make sure all the servers are using the same rate limiter
 	for _, name := range servers {
@@ -185,7 +185,7 @@ func (r *serversRateLimiter) getDomainRateTracker(sub string) *rateTrack {
 	return tracker
 }
 
-func (r *serversRateLimiter) getNameservers(domain string) []string {
+func (r *RateTracker) getNameservers(domain string) []string {
 	client := dns.Client{
 		Net:     "tcp",
 		Timeout: time.Minute,

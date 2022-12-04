@@ -35,7 +35,7 @@ type Resolvers struct {
 	qps       int
 	maxSet    bool
 	rate      ratelimit.Limiter
-	servRates *serversRateLimiter
+	servRates *RateTracker
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
@@ -96,7 +96,6 @@ func NewResolvers() *Resolvers {
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		resps:     responses,
-		servRates: newServersRateLimiter(),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
@@ -116,6 +115,10 @@ func (r *Resolvers) Len() int {
 // SetLogger assigns a new logger to the resolver pool.
 func (r *Resolvers) SetLogger(l *log.Logger) {
 	r.log = l
+}
+
+func (r *Resolvers) SetRateTracker(rt *RateTracker) {
+	r.servRates = rt
 }
 
 // SetTimeout updates the amount of time this pool will wait for response messages.
@@ -207,7 +210,9 @@ func (r *Resolvers) Stop() {
 	default:
 	}
 	close(r.done)
-	close(r.servRates.done)
+	if r.servRates != nil {
+		close(r.servRates.done)
+	}
 	r.conns.Close()
 
 	all := r.pool.AllResolvers()
@@ -239,7 +244,9 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 
 		req.Msg = msg
 		req.Result = ch
-		r.servRates.take(msg.Question[0].Name)
+		if r.servRates != nil {
+			r.servRates.take(msg.Question[0].Name)
+		}
 		r.queue.Append(req)
 		return
 	}
@@ -351,7 +358,9 @@ func (r *Resolvers) processResponses() {
 			} else {
 				req.Result <- req.Resp
 				req.Res.collectStats(req.Resp)
-				r.servRates.success(name)
+				if r.servRates != nil {
+					r.servRates.success(name)
+				}
 				req.release()
 			}
 		}
@@ -379,7 +388,9 @@ func (r *Resolvers) timeouts() {
 				for _, req := range res.xchgs.removeExpired() {
 					req.errNoResponse()
 					res.collectStats(req.Msg)
-					r.servRates.timeout(req.Msg.Question[0].Name)
+					if r.servRates != nil {
+						r.servRates.timeout(req.Msg.Question[0].Name)
+					}
 					req.release()
 				}
 			}
