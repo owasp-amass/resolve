@@ -74,6 +74,11 @@ type ExtractedAnswer struct {
 // AnswersByType returns only the answers from the DNS Answer section matching the provided type.
 func AnswersByType(answers []*ExtractedAnswer, qtype uint16) []*ExtractedAnswer {
 	var subset []*ExtractedAnswer
+
+	if answers == nil {
+		return subset
+	}
+
 	for _, a := range answers {
 		if a.Type == qtype {
 			subset = append(subset, a)
@@ -85,6 +90,11 @@ func AnswersByType(answers []*ExtractedAnswer, qtype uint16) []*ExtractedAnswer 
 // ExtractAnswers returns information from the DNS Answer section of the provided Msg in ExtractedAnswer type.
 func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
 	var data []*ExtractedAnswer
+
+	if msg == nil {
+		return data
+	}
+
 	for _, a := range msg.Answer {
 		var value string
 		switch a.Header().Rrtype {
