@@ -37,6 +37,7 @@ type RateTracker struct {
 	catchLimiter    *rateTrack
 }
 
+// NewRateTracker returns an active RateTracker that tracks and rate limits per name server.
 func NewRateTracker() *RateTracker {
 	r := &RateTracker{
 		done:            make(chan struct{}, 1),
@@ -56,7 +57,18 @@ func newRateTrack() *rateTrack {
 	}
 }
 
-func (r *RateTracker) take(sub string) {
+// Stop will release the RateTracker resources.
+func (r *RateTracker) Stop() {
+	select {
+	case <-r.done:
+		return
+	default:
+	}
+	close(r.done)
+}
+
+// Take blocks as required by the implemented rate limiter for the associated name server.
+func (r *RateTracker) Take(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
@@ -66,19 +78,21 @@ func (r *RateTracker) take(sub string) {
 	rate.Take()
 }
 
-func (r *RateTracker) timeout(sub string) {
-	tracker := r.getDomainRateTracker(sub)
-
-	tracker.Lock()
-	tracker.timeout++
-	tracker.Unlock()
-}
-
-func (r *RateTracker) success(sub string) {
+// Success signals to the RateTracker that a request for the provided subdomain name was successful.
+func (r *RateTracker) Success(sub string) {
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
 	tracker.success++
+	tracker.Unlock()
+}
+
+// Timeout signals to the RateTracker that a request for the provided subdomain name timed out.
+func (r *RateTracker) Timeout(sub string) {
+	tracker := r.getDomainRateTracker(sub)
+
+	tracker.Lock()
+	tracker.timeout++
 	tracker.Unlock()
 }
 

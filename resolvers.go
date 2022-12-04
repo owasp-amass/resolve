@@ -211,7 +211,7 @@ func (r *Resolvers) Stop() {
 	}
 	close(r.done)
 	if r.servRates != nil {
-		close(r.servRates.done)
+		r.servRates.Stop()
 	}
 	r.conns.Close()
 
@@ -245,7 +245,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 		req.Msg = msg
 		req.Result = ch
 		if r.servRates != nil {
-			r.servRates.take(msg.Question[0].Name)
+			r.servRates.Take(msg.Question[0].Name)
 		}
 		r.queue.Append(req)
 		return
@@ -359,7 +359,7 @@ func (r *Resolvers) processResponses() {
 				req.Result <- req.Resp
 				req.Res.collectStats(req.Resp)
 				if r.servRates != nil {
-					r.servRates.success(name)
+					r.servRates.Success(name)
 				}
 				req.release()
 			}
@@ -389,7 +389,7 @@ func (r *Resolvers) timeouts() {
 					req.errNoResponse()
 					res.collectStats(req.Msg)
 					if r.servRates != nil {
-						r.servRates.timeout(req.Msg.Question[0].Name)
+						r.servRates.Timeout(req.Msg.Question[0].Name)
 					}
 					req.release()
 				}
