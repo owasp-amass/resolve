@@ -197,11 +197,12 @@ func (r *RateTracker) getDomainRateTracker(sub string) *rateTrack {
 func (r *RateTracker) getMappedServers(sub, domain string) []string {
 	var servers []string
 
-	r.deepestZone(sub, domain, func(name string) {
+	r.deepestZone(sub, domain, func(name string) bool {
 		if serv, found := r.domainToServers[name]; found {
 			servers = serv
-			return
+			return true
 		}
+		return false
 	})
 
 	if len(servers) == 0 {
@@ -217,12 +218,13 @@ func (r *RateTracker) deepestNameServers(sub, domain string) ([]string, string) 
 	var zone string
 	var servers []string
 
-	r.deepestZone(sub, domain, func(name string) {
+	r.deepestZone(sub, domain, func(name string) bool {
 		if s := r.getNameservers(name); len(s) > 0 {
 			zone = name
 			servers = s
-			return
+			return true
 		}
+		return false
 	})
 	return servers, zone
 }
@@ -244,13 +246,15 @@ func (r *RateTracker) getNameservers(domain string) []string {
 	return servers
 }
 
-func (r *RateTracker) deepestZone(sub, domain string, callback func(name string)) {
+func (r *RateTracker) deepestZone(sub, domain string, callback func(name string) bool) {
 	base := len(strings.Split(domain, "."))
 	labels := strings.Split(sub, ".")
 
 	// Check for a zone at each label starting with the FQDN
 	max := len(labels) - base
 	for i := 0; i < max; i++ {
-		callback(strings.Join(labels[i:], "."))
+		if callback(strings.Join(labels[i:], ".")) {
+			break
+		}
 	}
 }
