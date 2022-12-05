@@ -252,7 +252,7 @@ func (r *RateTracker) deepestZone(sub, domain string, callback func(name string)
 
 	// Check for a zone at each label starting with the FQDN
 	max := len(labels) - base
-	for i := 0; i < max; i++ {
+	for i := 0; i <= max; i++ {
 		if callback(strings.Join(labels[i:], ".")) {
 			break
 		}
