@@ -49,24 +49,23 @@ type resolver struct {
 	stats   *stats
 }
 
-func (r *Resolvers) initializeResolver(addr string, qps int) *resolver {
+func (r *Resolvers) initializeResolver(qps int, addr string) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
 	}
 
-	uaddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil
+	var res *resolver
+	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
+		res = &resolver{
+			done:    make(chan struct{}, 1),
+			xchgs:   newXchgMgr(r.timeout),
+			address: uaddr,
+			qps:     qps,
+			stats:   new(stats),
+		}
 	}
-
-	return &resolver{
-		done:    make(chan struct{}, 1),
-		xchgs:   newXchgMgr(r.timeout),
-		address: uaddr,
-		qps:     qps,
-		stats:   new(stats),
-	}
+	return res
 }
 
 func (r *resolver) stop() {
@@ -100,10 +99,10 @@ func NewResolvers() *Resolvers {
 		options:   new(ThresholdOptions),
 	}
 
-	go r.processResponses()
 	go r.timeouts()
 	go r.enforceMaxQPS()
 	go r.thresholdChecks()
+	go r.processResponses()
 	return r
 }
 
@@ -180,18 +179,15 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 			addr = net.JoinHostPort(addr, "53")
 		}
 		// check that this address will not create a duplicate resolver
-		uaddr, err := net.ResolveUDPAddr("udp", addr)
-		if err != nil {
-			continue
-		}
-		if _, found := r.rmap[uaddr.IP.String()]; found {
-			continue
-		}
-		if res := r.initializeResolver(addr, qps); res != nil {
-			r.rmap[res.address.IP.String()] = struct{}{}
-			r.pool.AddResolver(res)
-			if !r.maxSet {
-				r.qps += qps
+		if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
+			if _, found := r.rmap[uaddr.IP.String()]; !found {
+				if res := r.initializeResolver(qps, addr); res != nil {
+					r.rmap[res.address.IP.String()] = struct{}{}
+					r.pool.AddResolver(res)
+					if !r.maxSet {
+						r.qps += qps
+					}
+				}
 			}
 		}
 	}
@@ -294,18 +290,17 @@ loop:
 			if r.rate != nil {
 				r.rate.Take()
 			}
-			e, ok := r.queue.Next()
-			if !ok {
-				continue loop
-			}
-			if req, ok := e.(*request); ok {
-				if res := r.pool.GetResolver(); res != nil {
-					req.Res = res
-					r.writeMsg(req)
-					continue loop
+
+			if e, yes := r.queue.Next(); yes {
+				if req, ok := e.(*request); ok {
+					if res := r.pool.GetResolver(); res != nil {
+						req.Res = res
+						r.writeMsg(req)
+						continue loop
+					}
+					req.errNoResponse()
+					req.release()
 				}
-				req.errNoResponse()
-				req.release()
 			}
 		}
 	}
@@ -406,24 +401,20 @@ func (r *Resolvers) timeouts() {
 func (r *Resolvers) writeMsg(req *request) {
 	res := req.Res
 
-	out, err := req.Msg.Pack()
-	if err != nil {
-		return
-	}
+	if out, err := req.Msg.Pack(); err == nil {
+		now := time.Now()
+		req.Timestamp = now
 
-	now := time.Now()
-	// Set the timestamp for message expiration
-	req.Timestamp = now
-	if res.xchgs.add(req) != nil {
-		return
-	}
+		if res.xchgs.add(req) == nil {
+			conn := r.conns.Next()
 
-	conn := r.conns.Next()
-	conn.SetWriteDeadline(now.Add(500 * time.Millisecond))
-	if n, err := conn.WriteToUDP(out, res.address); err != nil || n < len(out) {
-		_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
-		req.errNoResponse()
-		req.release()
+			conn.SetWriteDeadline(now.Add(500 * time.Millisecond))
+			if n, err := conn.WriteToUDP(out, res.address); err != nil || n < len(out) {
+				_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
+				req.errNoResponse()
+				req.release()
+			}
+		}
 	}
 }
 

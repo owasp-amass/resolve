@@ -36,17 +36,11 @@ func newConnections(cpus int, resps queue.Queue) *connections {
 		resps: resps,
 	}
 
-	var failed bool
 	for i := 0; i < cpus; i++ {
 		if err := conns.Add(); err != nil {
-			failed = true
-			break
+			conns.Close()
+			return nil
 		}
-	}
-
-	if failed {
-		conns.Close()
-		return nil
 	}
 	return conns
 }
@@ -73,24 +67,20 @@ func (c *connections) Next() *net.UDPConn {
 }
 
 func (c *connections) Add() error {
-	addr, err := net.ResolveUDPAddr("udp", ":0")
-	if err != nil {
-		return err
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return err
-	}
-	if err := conn.SetDeadline(time.Time{}); err != nil {
-		conn.Close()
-		return err
-	}
+	var err error
+	var addr *net.UDPAddr
+	var conn *net.UDPConn
 
-	c.setMaxReadBufSize(conn)
-	c.setMaxWriteBufSize(conn)
-	c.conns = append(c.conns, conn)
-	go c.responses(conn)
-	return nil
+	if addr, err = net.ResolveUDPAddr("udp", ":0"); err == nil {
+		if conn, err = net.ListenUDP("udp", addr); err == nil {
+			_ = conn.SetDeadline(time.Time{})
+			c.setMaxReadBufSize(conn)
+			c.setMaxWriteBufSize(conn)
+			c.conns = append(c.conns, conn)
+			go c.responses(conn)
+		}
+	}
+	return err
 }
 
 func (c *connections) responses(conn *net.UDPConn) {

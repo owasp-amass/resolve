@@ -15,6 +15,18 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestInitializeResolver(t *testing.T) {
+	r := NewResolvers()
+
+	if res := r.initializeResolver(100, "192.168.1.1"); res == nil ||
+		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
+		t.Errorf("failed to add the port to the provided address")
+	}
+	if res := r.initializeResolver(100, "300.300.300.300"); res != nil {
+		t.Errorf("failed to detect the invalid IP address provided")
+	}
+}
+
 func TestSetTimeout(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(1000, "8.8.8.8")
@@ -155,6 +167,7 @@ func TestQuery(t *testing.T) {
 	r := NewResolvers()
 	_ = r.AddResolvers(10, addrstr)
 	defer r.Stop()
+	r.SetDetectionResolver(10, "8.8.4.4")
 
 	ch := make(chan *dns.Msg, 1)
 	r.Query(context.Background(), nil, ch)

@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	maxQPSPerNameserver = 100
-	successesToRaiseQPS = 5
-	numIntervalSeconds  = 3
-	rateUpdateInterval  = numIntervalSeconds * time.Second
+	maxQPSPerNameserver  = 100
+	numIntervalSeconds   = 2
+	rateUpdateInterval   = numIntervalSeconds * time.Second
+	maxTimeoutPercentage = 0.1
 )
 
 type rateTrack struct {
@@ -61,10 +61,9 @@ func newRateTrack() *rateTrack {
 func (r *RateTracker) Stop() {
 	select {
 	case <-r.done:
-		return
 	default:
+		close(r.done)
 	}
-	close(r.done)
 }
 
 // Take blocks as required by the implemented rate limiter for the associated name server.
@@ -127,33 +126,20 @@ func (rt *rateTrack) update() {
 	// check if this rate tracker has already been updated
 	if rt.success == 0 && rt.timeout == 0 {
 		return
+	} else if rt.success+rt.timeout < rt.qps/2 {
+		return
 	}
-
-	var updated bool
 	// timeouts in excess of 5% indicate a need to slow down
-	if float64(rt.timeout)/float64(rt.success+rt.timeout) > 0.05 {
+	if float64(rt.timeout)/float64(rt.success+rt.timeout) > maxTimeoutPercentage {
 		rt.qps--
 		if rt.qps <= 0 {
 			rt.qps = 1
 		}
-		updated = true
+	} else {
+		rt.qps++
 	}
-	// a good number of successes are necessary to warrant an increase
-	if !updated && rt.success > 0 {
-		if blocks := rt.success / successesToRaiseQPS; blocks > 0 {
-			if inc := blocks / numIntervalSeconds; inc > 0 {
-				rt.qps += inc
-				updated = true
-			}
-		} else if blocks == 0 && rt.qps <= successesToRaiseQPS {
-			rt.qps++
-			updated = true
-		}
-	}
-
-	if updated {
-		rt.rate = ratelimit.New(rt.qps)
-	}
+	// update the QPS rate limiter and reset counters
+	rt.rate = ratelimit.New(rt.qps)
 	rt.success = 0
 	rt.timeout = 0
 }
@@ -197,7 +183,7 @@ func (r *RateTracker) getDomainRateTracker(sub string) *rateTrack {
 func (r *RateTracker) getMappedServers(sub, domain string) []string {
 	var servers []string
 
-	r.deepestZone(sub, domain, func(name string) bool {
+	FQDNToRegistered(sub, domain, func(name string) bool {
 		if serv, found := r.domainToServers[name]; found {
 			servers = serv
 			return true
@@ -218,13 +204,14 @@ func (r *RateTracker) deepestNameServers(sub, domain string) ([]string, string) 
 	var zone string
 	var servers []string
 
-	r.deepestZone(sub, domain, func(name string) bool {
+	FQDNToRegistered(sub, domain, func(name string) bool {
+		var found bool
 		if s := r.getNameservers(name); len(s) > 0 {
 			zone = name
 			servers = s
-			return true
+			found = true
 		}
-		return false
+		return found
 	})
 	return servers, zone
 }
@@ -244,17 +231,4 @@ func (r *RateTracker) getNameservers(domain string) []string {
 		}
 	}
 	return servers
-}
-
-func (r *RateTracker) deepestZone(sub, domain string, callback func(name string) bool) {
-	base := len(strings.Split(domain, "."))
-	labels := strings.Split(sub, ".")
-
-	// Check for a zone at each label starting with the FQDN
-	max := len(labels) - base
-	for i := 0; i <= max; i++ {
-		if callback(strings.Join(labels[i:], ".")) {
-			break
-		}
-	}
 }

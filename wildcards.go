@@ -80,21 +80,20 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 
 	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
 	domain = strings.ToLower(RemoveLastDot(domain))
-
-	base := len(strings.Split(domain, "."))
-	labels := strings.Split(name, ".")
-	if len(labels) > base {
-		labels = labels[1:]
+	if labels := strings.Split(name, "."); len(labels) > len(strings.Split(domain, ".")) {
+		name = strings.Join(labels[1:], ".")
 	}
-	// Check for a DNS wildcard at each label starting with the root domain
-	for i := len(labels) - base; i >= 0; i-- {
-		sub := strings.Join(labels[i:], ".")
 
+	var found bool
+	// Check for a DNS wildcard at each label starting with the registered domain
+	RegisteredToFQDN(domain, name, func(sub string) bool {
 		if w := r.getWildcard(ctx, sub); w.respMatchesWildcard(resp) {
+			found = true
 			return true
 		}
-	}
-	return false
+		return false
+	})
+	return found
 }
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
@@ -107,18 +106,16 @@ func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
 		addr = net.JoinHostPort(addr, "53")
 	}
 	// check that this address will not create a duplicate resolver
-	uaddr, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return
-	}
-	if _, found := r.rmap[uaddr.IP.String()]; found {
-		r.detector = r.pool.LookupResolver(uaddr.IP.String())
-		return
-	}
-	if res := r.initializeResolver(addr, qps); res != nil {
-		r.rmap[res.address.IP.String()] = struct{}{}
-		r.pool.AddResolver(res)
-		r.detector = res
+	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
+		if _, found := r.rmap[uaddr.IP.String()]; found {
+			r.detector = r.pool.LookupResolver(uaddr.IP.String())
+			return
+		}
+		if res := r.initializeResolver(qps, addr); res != nil {
+			r.rmap[res.address.IP.String()] = struct{}{}
+			r.pool.AddResolver(res)
+			r.detector = res
+		}
 	}
 }
 
@@ -130,18 +127,20 @@ func (r *Resolvers) getDetectionResolver() *resolver {
 }
 
 func (r *Resolvers) goodDetector() bool {
-	if d := r.getDetectionResolver(); d == nil {
-		d = r.pool.GetResolver()
-		if d == nil {
-			return false
-		}
+	success := true
 
-		r.SetDetectionResolver(d.qps, d.address.String())
-		if r.detector == nil {
-			return false
+	if d := r.getDetectionResolver(); d == nil {
+		success = false
+
+		if d = r.pool.GetResolver(); d != nil {
+			r.SetDetectionResolver(d.qps, d.address.String())
+
+			if r.detector != nil {
+				success = true
+			}
 		}
 	}
-	return true
+	return success
 }
 
 func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {

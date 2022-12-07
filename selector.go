@@ -94,12 +94,10 @@ func (r *randomSelector) AddResolver(res *resolver) {
 	r.Lock()
 	defer r.Unlock()
 
-	if _, found := r.lookup[res.address.IP.String()]; found {
-		return
+	if _, found := r.lookup[res.address.IP.String()]; !found {
+		r.list = append(r.list, res)
+		r.lookup[res.address.IP.String()] = res
 	}
-
-	r.list = append(r.list, res)
-	r.lookup[res.address.IP.String()] = res
 }
 
 func (r *randomSelector) AllResolvers() []*resolver {
