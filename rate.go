@@ -126,10 +126,8 @@ func (rt *rateTrack) update() {
 	// check if this rate tracker has already been updated
 	if rt.success == 0 && rt.timeout == 0 {
 		return
-	} else if rt.success+rt.timeout < rt.qps/2 {
-		return
 	}
-	// timeouts in excess of 5% indicate a need to slow down
+	// timeouts in excess of maxTimeoutPercentage indicate a need to slow down
 	if float64(rt.timeout)/float64(rt.success+rt.timeout) > maxTimeoutPercentage {
 		rt.qps--
 		if rt.qps <= 0 {
