@@ -244,7 +244,7 @@ loop:
 			Result: ch,
 		}
 
-		r.writeMsg(req)
+		r.writeReq(req)
 		select {
 		case <-ctx.Done():
 			break loop

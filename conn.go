@@ -5,6 +5,7 @@
 package resolve
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -78,6 +79,22 @@ func (c *connections) Add() error {
 			c.setMaxWriteBufSize(conn)
 			c.conns = append(c.conns, conn)
 			go c.responses(conn)
+		}
+	}
+	return err
+}
+
+func (c *connections) WriteMsg(msg *dns.Msg, addr *net.UDPAddr) error {
+	var n int
+	var err error
+	var out []byte
+
+	if out, err = msg.Pack(); err == nil {
+		conn := c.Next()
+
+		conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		if n, err = conn.WriteToUDP(out, addr); err == nil && n < len(out) {
+			err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 		}
 	}
 	return err

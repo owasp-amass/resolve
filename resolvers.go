@@ -295,7 +295,7 @@ loop:
 				if req, ok := e.(*request); ok {
 					if res := r.pool.GetResolver(); res != nil {
 						req.Res = res
-						r.writeMsg(req)
+						r.writeReq(req)
 						continue loop
 					}
 					req.errNoResponse()
@@ -398,22 +398,16 @@ func (r *Resolvers) timeouts() {
 	}
 }
 
-func (r *Resolvers) writeMsg(req *request) {
+func (r *Resolvers) writeReq(req *request) {
 	res := req.Res
+	msg := req.Msg.Copy()
+	req.Timestamp = time.Now()
 
-	if out, err := req.Msg.Pack(); err == nil {
-		now := time.Now()
-		req.Timestamp = now
-
-		if res.xchgs.add(req) == nil {
-			conn := r.conns.Next()
-
-			conn.SetWriteDeadline(now.Add(500 * time.Millisecond))
-			if n, err := conn.WriteToUDP(out, res.address); err != nil || n < len(out) {
-				_ = res.xchgs.remove(req.Msg.Id, req.Msg.Question[0].Name)
-				req.errNoResponse()
-				req.release()
-			}
+	if res.xchgs.add(req) == nil {
+		if err := r.conns.WriteMsg(msg, res.address); err != nil {
+			_ = res.xchgs.remove(msg.Id, msg.Question[0].Name)
+			req.errNoResponse()
+			req.release()
 		}
 	}
 }
