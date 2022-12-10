@@ -336,7 +336,7 @@ func (r *Resolvers) processResponses() {
 		if res = r.pool.LookupResolver(addr); res == nil {
 			detector := r.getDetectionResolver()
 
-			if addr == detector.address.IP.String() {
+			if detector != nil && addr == detector.address.IP.String() {
 				res = detector
 			}
 		}
