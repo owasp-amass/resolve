@@ -58,6 +58,16 @@ func TestWildcardDetected(t *testing.T) {
 			input: "ns.wildcard.domain.com",
 			want:  false,
 		},
+		{
+			label: "invalid name within a middle-wildcard",
+			input: "wildcard.jeff_foley.domain.com",
+			want:  true,
+		},
+		{
+			label: "valid name within a middle-wildcard",
+			input: "wildcard.app.domain.com",
+			want:  false,
+		},
 	}
 
 	for _, c := range cases {
@@ -83,6 +93,10 @@ func wildcardHandler(w dns.ResponseWriter, req *dns.Msg) {
 		addr = "192.168.1.2"
 	} else if strings.HasSuffix(name, ".wildcard.domain.com.") {
 		addr = "192.168.1.64"
+	} else if strings.HasPrefix(name, "wildcard.") && strings.HasSuffix(name, ".domain.com") {
+		addr = "192.168.1.65"
+	} else if name == "wildcard.app.domain.com" {
+		addr = "192.168.1.66"
 	}
 
 	if addr == "" {
