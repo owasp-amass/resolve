@@ -42,7 +42,12 @@ type wildcard struct {
 }
 
 // UnlikelyName takes a subdomain name and returns an unlikely DNS name within that subdomain.
-func UnlikelyName(prefix, suffix string) string {
+func UnlikelyName(sub string) string {
+	return UnlikelyNameFromSplit("", sub)
+}
+
+// UnlikelyNameFromSplit takes a subdomain prefix and suffix and returns an unlikely DNS name in the middle of those.
+func UnlikelyNameFromSplit(prefix, suffix string) string {
 	ldh := []rune(LDHChars)
 	ldhLen := len(ldh)
 
@@ -216,7 +221,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, prefix, suffix string) (bo
 	for i := 0; i < numOfWildcardTests; i++ {
 		var name string
 		for {
-			name = UnlikelyName(prefix, suffix)
+			name = UnlikelyNameFromSplit(prefix, suffix)
 			if name != "" {
 				break
 			}

@@ -13,8 +13,8 @@ import (
 	"github.com/miekg/dns"
 )
 
-func TestUnlikelyName(t *testing.T) {
-	name := UnlikelyName("proxy", "example.com")
+func TestUnlikelyNameFromSplit(t *testing.T) {
+	name := UnlikelyNameFromSplit("proxy", "example.com")
 	if !strings.HasPrefix(name, "proxy.") {
 		t.Fatalf("Unlikely name `%s` does not have `%s` prefix", name, "proxy.")
 	}
