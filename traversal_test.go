@@ -151,20 +151,7 @@ func TestSplitRegisteredToFQDN(t *testing.T) {
 			name:       "Only TLD+1",
 			fqdn:       "ezproxy.utica.edu",
 			registered: "utica.edu",
-			expected: []Result{
-				{
-					"www",
-					"com.ezproxy.utica.edu",
-				},
-				{
-					"www.accessphysiotherapy",
-					"ezproxy.utica.edu",
-				},
-				{
-					"www.accessphysiotherapy.com",
-					"utica.edu",
-				},
-			},
+			expected:   []Result{},
 			callback: func(prefix, suffix string) bool {
 				got = append(got, Result{
 					prefix,
