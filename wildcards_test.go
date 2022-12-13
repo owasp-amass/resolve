@@ -13,6 +13,17 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestUnlikelyName(t *testing.T) {
+	name := UnlikelyName("proxy", "example.com")
+	if !strings.HasPrefix(name, "proxy.") {
+		t.Fatalf("Unlikely name `%s` does not have `%s` prefix", name, "proxy.")
+	}
+	if !strings.HasSuffix(name, ".example.com") {
+		t.Fatalf("Unlikely name `%s` does not have `%s` suffix", name, ".example.com")
+	}
+	t.Log(name)
+}
+
 func TestSetDetectionResolver(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
@@ -93,9 +104,9 @@ func wildcardHandler(w dns.ResponseWriter, req *dns.Msg) {
 		addr = "192.168.1.2"
 	} else if strings.HasSuffix(name, ".wildcard.domain.com.") {
 		addr = "192.168.1.64"
-	} else if strings.HasPrefix(name, "wildcard.") && strings.HasSuffix(name, ".domain.com") {
+	} else if name == "wildcard.app.domain.com." {
 		addr = "192.168.1.65"
-	} else if name == "wildcard.app.domain.com" {
+	} else if strings.HasPrefix(name, "wildcard.") && strings.HasSuffix(name, ".domain.com.") {
 		addr = "192.168.1.66"
 	}
 

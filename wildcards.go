@@ -42,12 +42,15 @@ type wildcard struct {
 }
 
 // UnlikelyName takes a subdomain name and returns an unlikely DNS name within that subdomain.
-func UnlikelyName(sub string) string {
+func UnlikelyName(prefix, suffix string) string {
 	ldh := []rune(LDHChars)
 	ldhLen := len(ldh)
 
 	// Determine the max label length
-	l := MaxDNSNameLen - (len(sub) + 1)
+	l := MaxDNSNameLen - (len(suffix) + 1)
+	if len(prefix) > 0 {
+		l = l - (len(prefix) + 1)
+	}
 	if l > MaxLabelLen {
 		l = MaxLabelLen
 	} else if l < MinLabelLen {
@@ -69,7 +72,13 @@ func UnlikelyName(sub string) string {
 	if newlabel == "" {
 		return newlabel
 	}
-	return newlabel + "." + sub
+
+	sub := newlabel + "." + suffix
+	if len(prefix) > 0 {
+		sub = prefix + "." + sub
+	}
+
+	return sub
 }
 
 // WildcardDetected returns true when the provided DNS response could be a wildcard match.
@@ -78,7 +87,8 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 		return false
 	}
 
-	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
+	question := RemoveLastDot(resp.Question[0].Name)
+	name := strings.ToLower(question)
 	domain = strings.ToLower(RemoveLastDot(domain))
 	if labels := strings.Split(name, "."); len(labels) > len(strings.Split(domain, ".")) {
 		name = strings.Join(labels[1:], ".")
@@ -87,12 +97,26 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 	var found bool
 	// Check for a DNS wildcard at each label starting with the registered domain
 	RegisteredToFQDN(domain, name, func(sub string) bool {
-		if w := r.getWildcard(ctx, sub); w.respMatchesWildcard(resp) {
+		if w := r.getWildcard(ctx, "", sub); w.respMatchesWildcard(resp) {
 			found = true
 			return true
 		}
 		return false
 	})
+
+	if found {
+		return true
+	}
+
+	// Check for a DNS wildcard between levels
+	SplitRegisteredToFQDN(domain, question, func(prefix, suffix string) bool {
+		if w := r.getWildcard(ctx, prefix, suffix); w.respMatchesWildcard(resp) {
+			found = true
+			return true
+		}
+		return false
+	})
+
 	return found
 }
 
@@ -143,18 +167,18 @@ func (r *Resolvers) goodDetector() bool {
 	return success
 }
 
-func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
+func (r *Resolvers) getWildcard(ctx context.Context, prefix, sub string) *wildcard {
 	r.Lock()
-	w, found := r.wildcards[sub]
+	w, found := r.wildcards[prefix+".."+sub]
 	if !found {
 		w = &wildcard{}
-		r.wildcards[sub] = w
+		r.wildcards[prefix+".."+sub] = w
 	}
 	r.Unlock()
 
 	if !found {
 		w.Lock()
-		w.Detected, w.Answers = r.wildcardTest(ctx, sub)
+		w.Detected, w.Answers = r.wildcardTest(ctx, prefix, sub)
 		w.Unlock()
 	}
 	return w
@@ -182,7 +206,7 @@ func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
 }
 
 // Determines if the provided subdomain has a DNS wildcard.
-func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*ExtractedAnswer) {
+func (r *Resolvers) wildcardTest(ctx context.Context, prefix, suffix string) (bool, []*ExtractedAnswer) {
 	var detected bool
 	var answers []*ExtractedAnswer
 
@@ -192,7 +216,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 	for i := 0; i < numOfWildcardTests; i++ {
 		var name string
 		for {
-			name = UnlikelyName(sub)
+			name = UnlikelyName(prefix, suffix)
 			if name != "" {
 				break
 			}
@@ -228,7 +252,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 		}
 	}
 	if detected {
-		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.detector.address, "*."+sub)
+		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.detector.address, "*."+suffix)
 	}
 	return detected, final
 }

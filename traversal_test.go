@@ -106,3 +106,97 @@ func TestRegisteredToFQDN(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitRegisteredToFQDN(t *testing.T) {
+	type Result struct {
+		prefix string
+		suffix string
+	}
+
+	var got []Result
+	tests := []struct {
+		name       string
+		fqdn       string
+		registered string
+		expected   []Result
+		callback   func(prefix, suffix string) bool
+	}{
+		{
+			name:       "Full traversal",
+			fqdn:       "www.accessphysiotherapy.com.ezproxy.utica.edu",
+			registered: "utica.edu",
+			expected: []Result{
+				{
+					"www",
+					"com.ezproxy.utica.edu",
+				},
+				{
+					"www.accessphysiotherapy",
+					"ezproxy.utica.edu",
+				},
+				{
+					"www.accessphysiotherapy.com",
+					"utica.edu",
+				},
+			},
+			callback: func(prefix, suffix string) bool {
+				got = append(got, Result{
+					prefix,
+					suffix,
+				})
+				return false
+			},
+		},
+		{
+			name:       "Only TLD+1",
+			fqdn:       "ezproxy.utica.edu",
+			registered: "utica.edu",
+			expected: []Result{
+				{
+					"www",
+					"com.ezproxy.utica.edu",
+				},
+				{
+					"www.accessphysiotherapy",
+					"ezproxy.utica.edu",
+				},
+				{
+					"www.accessphysiotherapy.com",
+					"utica.edu",
+				},
+			},
+			callback: func(prefix, suffix string) bool {
+				got = append(got, Result{
+					prefix,
+					suffix,
+				})
+				return true
+			},
+		},
+
+		{
+			name:       "Only subdomain",
+			fqdn:       "utica.edu",
+			registered: "utica.edu",
+			expected:   []Result{},
+			callback: func(prefix, suffix string) bool {
+				got = append(got, Result{
+					prefix,
+					suffix,
+				})
+				return true
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got = []Result{}
+
+			SplitRegisteredToFQDN(tt.registered, tt.fqdn, tt.callback)
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("Unexpected Result, expected %v, got %v", tt.expected, got)
+			}
+		})
+	}
+}
