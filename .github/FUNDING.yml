@@ -1,4 +1,2 @@
-# These are supported funding model platforms
-
-github: [caffix]
-custom: ["https://www.buymeacoffee.com/caffix", "https://www.paypal.me/caffix", "https://venmo.com/caffix", "https://cash.app/$caffix"]
+custom: https://owasp.org/donate/?reponame=www-project-amass&title=OWASP+Amass
+github: OWASP

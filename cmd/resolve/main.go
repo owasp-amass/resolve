@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/caffix/queue"
-	"github.com/caffix/resolve"
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve"
 	"golang.org/x/net/publicsuffix"
 )
 

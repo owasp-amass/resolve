@@ -1,10 +1,10 @@
-![GitHub Test Status](https://github.com/caffix/resolve/workflows/tests/badge.svg)
-[![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/caffix/resolve?tab=overview)
-[![License](https://img.shields.io/github/license/caffix/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Go Report](https://goreportcard.com/badge/github.com/caffix/resolve)](https://goreportcard.com/report/github.com/caffix/resolve)
-[![CodeFactor](https://www.codefactor.io/repository/github/caffix/resolve/badge)](https://www.codefactor.io/repository/github/caffix/resolve)
-[![Maintainability](https://api.codeclimate.com/v1/badges/2013705e6ec3b785e8f6/maintainability)](https://codeclimate.com/github/caffix/resolve/maintainability)
-[![Codecov](https://codecov.io/gh/caffix/resolve/branch/master/graph/badge.svg)](https://codecov.io/gh/caffix/resolve)
+![GitHub Test Status](https://github.com/owasp-amass/resolve/workflows/tests/badge.svg)
+[![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/owasp-amass/resolve?tab=overview)
+[![License](https://img.shields.io/github/license/owasp-amass/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Go Report](https://goreportcard.com/badge/github.com/owasp-amass/resolve)](https://goreportcard.com/report/github.com/owasp-amass/resolve)
+[![CodeFactor](https://www.codefactor.io/repository/github/owasp-amass/resolve/badge)](https://www.codefactor.io/repository/github/owasp-amass/resolve)
+[![Maintainability](https://api.codeclimate.com/v1/badges/2013705e6ec3b785e8f6/maintainability)](https://codeclimate.com/github/owasp-amass/resolve/maintainability)
+[![Codecov](https://codecov.io/gh/owasp-amass/resolve/branch/master/graph/badge.svg)](https://codecov.io/gh/owasp-amass/resolve)
 
 # Leverage Many Recursive DNS Servers
 
@@ -15,10 +15,10 @@ Designed to support DNS brute-forcing with minimal system resources:
 - A minimal number of goroutines are employed by the package
 - Provides features like DNS wildcard detection and NSEC traversal
 
-## Installation [![Go Version](https://img.shields.io/github/go-mod/go-version/caffix/resolve)](https://golang.org/dl/)
+## Installation [![Go Version](https://img.shields.io/github/go-mod/go-version/owasp-amass/resolve)](https://golang.org/dl/)
 
 ```bash
-go get -v -u github.com/caffix/resolve@master
+go get -v -u github.com/owasp-amass/resolve@master
 ```
 
 ## Usage
@@ -75,6 +75,6 @@ for {
 }
 ```
 
-## Licensing [![License](https://img.shields.io/github/license/caffix/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
+## Licensing [![License](https://img.shields.io/github/license/owasp-amass/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
 
 This program is free software: you can redistribute it and/or modify it under the terms of the [Apache license](LICENSE).
