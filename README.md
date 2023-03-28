@@ -3,8 +3,8 @@
 [![License](https://img.shields.io/github/license/owasp-amass/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Go Report](https://goreportcard.com/badge/github.com/owasp-amass/resolve)](https://goreportcard.com/report/github.com/owasp-amass/resolve)
 [![CodeFactor](https://www.codefactor.io/repository/github/owasp-amass/resolve/badge)](https://www.codefactor.io/repository/github/owasp-amass/resolve)
-[![Maintainability](https://api.codeclimate.com/v1/badges/2013705e6ec3b785e8f6/maintainability)](https://codeclimate.com/github/owasp-amass/resolve/maintainability)
-[![Codecov](https://codecov.io/gh/owasp-amass/resolve/branch/master/graph/badge.svg)](https://codecov.io/gh/owasp-amass/resolve)
+[![Maintainability](https://api.codeclimate.com/v1/badges/35fb58e657b0f94870b0/maintainability)](https://codeclimate.com/github/owasp-amass/resolve/maintainability)
+[![codecov](https://codecov.io/gh/owasp-amass/resolve/branch/master/graph/badge.svg?token=HDCWO273A1)](https://codecov.io/gh/owasp-amass/resolve)
 
 # Leverage Many Recursive DNS Servers
 
