@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2022. All rights reserved.
+// Copyright © by Jeff Foley 2022-2023. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	maxQPSPerNameserver  = 100
+	maxQPSPerNameserver  = 500
 	numIntervalSeconds   = 2
 	rateUpdateInterval   = numIntervalSeconds * time.Second
 	maxTimeoutPercentage = 0.1
