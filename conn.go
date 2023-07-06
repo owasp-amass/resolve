@@ -92,7 +92,7 @@ func (c *connections) WriteMsg(msg *dns.Msg, addr *net.UDPAddr) error {
 	if out, err = msg.Pack(); err == nil {
 		conn := c.Next()
 
-		conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 		if n, err = conn.WriteToUDP(out, addr); err == nil && n < len(out) {
 			err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 		}

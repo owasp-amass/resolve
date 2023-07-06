@@ -32,7 +32,7 @@ func TestConnections(t *testing.T) {
 		msg := QueryMsg(name, 1)
 
 		if addr, err := net.ResolveUDPAddr("udp", addrstr); err == nil {
-			conn.WriteMsg(msg, addr)
+			_ = conn.WriteMsg(msg, addr)
 		}
 		if i%10 == 0 {
 			time.Sleep(100 * time.Millisecond)

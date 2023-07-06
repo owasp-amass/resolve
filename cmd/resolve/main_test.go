@@ -7,7 +7,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -114,17 +113,17 @@ func compareParams(got, expected *params) bool {
 }
 
 func TestSetupFiles(t *testing.T) {
-	logfile, err := ioutil.TempFile("", "log")
+	logfile, err := os.CreateTemp("", "log")
 	if err != nil {
 		t.Fatalf("Failed to open the temporary log file: %v", err)
 	}
 
-	output, err := ioutil.TempFile("", "output")
+	output, err := os.CreateTemp("", "output")
 	if err != nil {
 		t.Fatalf("Failed to open the temporary output file: %v", err)
 	}
 
-	input, err := ioutil.TempFile("", "input")
+	input, err := os.CreateTemp("", "input")
 	if err != nil {
 		t.Fatalf("Failed to open the temporary input file: %v", err)
 	}
@@ -248,7 +247,7 @@ func TestEventLoop(t *testing.T) {
 
 	output, _ := os.Open(os.DevNull)
 	p := &params{
-		Log:     log.New(ioutil.Discard, "", 0),
+		Log:     log.New(io.Discard, "", 0),
 		QPS:     10,
 		Qtypes:  []uint16{dns.TypeA},
 		Output:  output,

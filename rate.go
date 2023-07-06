@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	maxQPSPerNameserver  = 500
+	maxQPSPerNameserver  = 100
 	numIntervalSeconds   = 2
 	rateUpdateInterval   = numIntervalSeconds * time.Second
 	maxTimeoutPercentage = 0.1
