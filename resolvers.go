@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2023. All rights reserved.
+// Copyright © by Jeff Foley 2017-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -321,43 +321,42 @@ func (r *Resolvers) processResponses() {
 		case <-r.resps.Signal():
 		}
 
-		var response *resp
-		if element, ok := r.resps.Next(); ok {
-			if r, valid := element.(*resp); valid {
-				response = r
+		r.resps.Process(func(element interface{}) {
+			if response, ok := element.(*resp); ok && r != nil {
+				r.processSingleResp(response)
 			}
-		}
-		if response == nil {
-			continue
-		}
+		})
+	}
+}
 
-		var res *resolver
-		addr := response.Addr.IP.String()
-		if res = r.pool.LookupResolver(addr); res == nil {
-			detector := r.getDetectionResolver()
+func (r *Resolvers) processSingleResp(response *resp) {
+	var res *resolver
+	addr := response.Addr.IP.String()
 
-			if detector != nil && addr == detector.address.IP.String() {
-				res = detector
+	if res = r.pool.LookupResolver(addr); res == nil {
+		detector := r.getDetectionResolver()
+
+		if detector != nil && addr == detector.address.IP.String() {
+			res = detector
+		}
+	}
+	if res == nil {
+		return
+	}
+
+	msg := response.Msg
+	name := msg.Question[0].Name
+	if req := res.xchgs.remove(msg.Id, name); req != nil {
+		req.Resp = msg
+		if req.Resp.Truncated {
+			go req.Res.tcpExchange(req)
+		} else {
+			req.Result <- req.Resp
+			req.Res.collectStats(req.Resp)
+			if r.servRates != nil {
+				r.servRates.Success(name)
 			}
-		}
-		if res == nil {
-			continue
-		}
-
-		msg := response.Msg
-		name := msg.Question[0].Name
-		if req := res.xchgs.remove(msg.Id, name); req != nil {
-			req.Resp = msg
-			if req.Resp.Truncated {
-				go req.Res.tcpExchange(req)
-			} else {
-				req.Result <- req.Resp
-				req.Res.collectStats(req.Resp)
-				if r.servRates != nil {
-					r.servRates.Success(name)
-				}
-				req.release()
-			}
+			req.release()
 		}
 	}
 }
@@ -394,7 +393,9 @@ func (r *Resolvers) timeouts() {
 		r.Lock()
 		d := r.timeout / 2
 		r.Unlock()
-		time.Sleep(d)
+		if d > 0 {
+			time.Sleep(d)
+		}
 	}
 }
 

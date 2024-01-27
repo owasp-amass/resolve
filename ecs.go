@@ -1,10 +1,12 @@
-// Copyright © by Jeff Foley 2021-2023. All rights reserved.
+// Copyright © by Jeff Foley 2021-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
 package resolve
 
 import (
+	"time"
+
 	"github.com/miekg/dns"
 )
 
@@ -26,14 +28,18 @@ func (r *Resolvers) ClientSubnetCheck() {
 		})
 	}
 
+	var count int
 	for _, res := range all {
 		send(res)
+		count++
+		if count == 100 {
+			count = 0
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 
-	retries := make(map[string]struct{})
 	for i := 0; i < alen; i++ {
 		resp := <-ch
-
 		// pull the resolver associated with this message
 		key := xchgKey(resp.Id, resp.Question[0].Name)
 		res, found := msgsToRes[key]
@@ -41,16 +47,11 @@ func (r *Resolvers) ClientSubnetCheck() {
 			continue
 		}
 		delete(msgsToRes, key)
-		// give resolvers one additional chance to respond
-		if _, already := retries[res.address.IP.String()]; !already && resp.Rcode == RcodeNoResponse {
-			i--
-			retries[res.address.IP.String()] = struct{}{}
-			send(res)
-			continue
-		}
 		// check if the resolver responded, but did not return a successful response
 		if resp.Rcode != dns.RcodeSuccess || (!resp.Authoritative && !resp.RecursionAvailable) {
-			res.stop()
+			if res != nil {
+				res.stop()
+			}
 			continue
 		}
 
