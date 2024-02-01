@@ -1,33 +1,35 @@
-// Copyright © by Jeff Foley 2022-2023. All rights reserved.
+// Copyright © by Jeff Foley 2022-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
 package resolve
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/caffix/queue"
 	"github.com/miekg/dns"
+	"golang.org/x/sys/unix"
 )
 
-const maxUDPBufferSize = 64 * 1024 * 1024
+const headerSize = 12
 
 type resp struct {
 	Msg  *dns.Msg
-	Addr *net.UDPAddr
+	Addr net.Addr
 }
 
 type connections struct {
 	sync.Mutex
 	done      chan struct{}
-	conns     []*net.UDPConn
+	conns     []net.PacketConn
 	resps     queue.Queue
-	rbufSize  int
-	wbufSize  int
 	nextWrite int
 }
 
@@ -58,7 +60,7 @@ func (c *connections) Close() {
 	}
 }
 
-func (c *connections) Next() *net.UDPConn {
+func (c *connections) Next() net.PacketConn {
 	c.Lock()
 	defer c.Unlock()
 
@@ -69,22 +71,46 @@ func (c *connections) Next() *net.UDPConn {
 
 func (c *connections) Add() error {
 	var err error
-	var addr *net.UDPAddr
-	var conn *net.UDPConn
+	var conn net.PacketConn
 
-	if addr, err = net.ResolveUDPAddr("udp", ":0"); err == nil {
-		if conn, err = net.ListenUDP("udp", addr); err == nil {
-			_ = conn.SetDeadline(time.Time{})
-			c.setMaxReadBufSize(conn)
-			c.setMaxWriteBufSize(conn)
-			c.conns = append(c.conns, conn)
-			go c.responses(conn)
-		}
+	if runtime.GOOS == "linux" {
+		conn, err = c.linuxListenPacket()
+	} else {
+		conn, err = net.ListenPacket("udp", ":0")
+	}
+
+	if err == nil {
+		_ = conn.SetDeadline(time.Time{})
+		c.conns = append(c.conns, conn)
+		go c.responses(conn)
 	}
 	return err
 }
 
-func (c *connections) WriteMsg(msg *dns.Msg, addr *net.UDPAddr) error {
+func (c *connections) linuxListenPacket() (net.PacketConn, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var operr error
+
+			if err := c.Control(func(fd uintptr) {
+				operr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			}); err != nil {
+				return err
+			}
+
+			return operr
+		},
+	}
+
+	laddr := ":0"
+	if len(c.conns) > 0 {
+		laddr = c.conns[0].LocalAddr().String()
+	}
+
+	return lc.ListenPacket(context.Background(), "udp", laddr)
+}
+
+func (c *connections) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	var n int
 	var err error
 	var out []byte
@@ -93,14 +119,14 @@ func (c *connections) WriteMsg(msg *dns.Msg, addr *net.UDPAddr) error {
 		conn := c.Next()
 
 		_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-		if n, err = conn.WriteToUDP(out, addr); err == nil && n < len(out) {
+		if n, err = conn.WriteTo(out, addr); err == nil && n < len(out) {
 			err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 		}
 	}
 	return err
 }
 
-func (c *connections) responses(conn *net.UDPConn) {
+func (c *connections) responses(conn net.PacketConn) {
 	b := make([]byte, dns.DefaultMsgSize)
 
 	for {
@@ -109,7 +135,7 @@ func (c *connections) responses(conn *net.UDPConn) {
 			return
 		default:
 		}
-		if n, addr, err := conn.ReadFromUDP(b); err == nil && n >= headerSize {
+		if n, addr, err := conn.ReadFrom(b); err == nil && n >= headerSize {
 			m := new(dns.Msg)
 
 			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
@@ -118,42 +144,6 @@ func (c *connections) responses(conn *net.UDPConn) {
 					Addr: addr,
 				})
 			}
-		}
-	}
-}
-
-func (c *connections) setMaxReadBufSize(conn *net.UDPConn) {
-	c.Lock()
-	defer c.Unlock()
-
-	if c.rbufSize != 0 {
-		_ = conn.SetReadBuffer(c.rbufSize)
-		return
-	}
-
-	min := 1024
-	for size := maxUDPBufferSize; size > min; size /= 2 {
-		if err := conn.SetReadBuffer(size); err == nil {
-			c.rbufSize = size
-			return
-		}
-	}
-}
-
-func (c *connections) setMaxWriteBufSize(conn *net.UDPConn) {
-	c.Lock()
-	defer c.Unlock()
-
-	if c.wbufSize != 0 {
-		_ = conn.SetWriteBuffer(c.wbufSize)
-		return
-	}
-
-	min := 1024
-	for size := maxUDPBufferSize; size > min; size /= 2 {
-		if err := conn.SetWriteBuffer(size); err == nil {
-			c.wbufSize = size
-			return
 		}
 	}
 }

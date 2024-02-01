@@ -16,9 +16,9 @@ import (
 
 const (
 	maxQPSPerNameserver  = 100
-	numIntervalSeconds   = 2
+	numIntervalSeconds   = 10
 	rateUpdateInterval   = numIntervalSeconds * time.Second
-	maxTimeoutPercentage = 0.1
+	maxTimeoutPercentage = 0.2
 )
 
 type rateTrack struct {
@@ -129,12 +129,13 @@ func (rt *rateTrack) update() {
 	}
 	// timeouts in excess of maxTimeoutPercentage indicate a need to slow down
 	if float64(rt.timeout)/float64(rt.success+rt.timeout) > maxTimeoutPercentage {
-		rt.qps--
+		p := float64(rt.success) / float64(rt.success+rt.timeout)
+		rt.qps = int(float64(rt.qps) * p)
 		if rt.qps <= 0 {
 			rt.qps = 1
 		}
 	} else {
-		rt.qps++
+		rt.qps = rt.qps + 10
 	}
 	// update the QPS rate limiter and reset counters
 	rt.rate = ratelimit.New(rt.qps)

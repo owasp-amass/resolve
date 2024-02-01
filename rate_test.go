@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2022-2023. All rights reserved.
+// Copyright © by Jeff Foley 2022-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -29,14 +29,14 @@ func TestUpdateRateLimiters(t *testing.T) {
 	for i := 0; i < num; i++ {
 		rt.Timeout(domain)
 	}
-	time.Sleep(2 * rateUpdateInterval)
+	time.Sleep(rateUpdateInterval + (rateUpdateInterval / 2))
 
 	tracker.Lock()
 	qps2 := tracker.qps
 	tracker.Unlock()
 	// the QPS should now be lower
 	if qps2 >= qps {
-		t.Errorf("Unexpected QPS, expected %d, got %d", qps-1, qps2)
+		t.Errorf("Unexpected QPS, expected QPS lower than %d, got %d", qps, qps2)
 	}
 
 	tracker.Lock()
@@ -55,13 +55,13 @@ func TestUpdateRateLimiters(t *testing.T) {
 	for i := 0; i < qps; i++ {
 		rt.Success(domain)
 	}
-	time.Sleep(2 * rateUpdateInterval)
+	time.Sleep(rateUpdateInterval + (rateUpdateInterval / 2))
 
 	tracker.Lock()
 	qps2 = tracker.qps
 	tracker.Unlock()
-	// the QPS should now be lower
+	// the QPS should now be higher
 	if qps2 <= qps {
-		t.Errorf("Unexpected QPS, expected %d, got %d", qps+1, qps2)
+		t.Errorf("Unexpected QPS, expected QPS higher than %d, got %d", qps, qps2)
 	}
 }

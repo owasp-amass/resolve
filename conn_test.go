@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2022-2023. All rights reserved.
+// Copyright © by Jeff Foley 2022-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -6,6 +6,7 @@ package resolve
 
 import (
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestConnections(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	resps := queue.NewQueue()
-	conn := newConnections(1, resps)
+	conn := newConnections(runtime.NumCPU(), resps)
 	defer conn.Close()
 
 	for i := 0; i < 100; i++ {

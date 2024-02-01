@@ -5,6 +5,7 @@
 package resolve
 
 import (
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -16,37 +17,45 @@ func (r *Resolvers) ClientSubnetCheck() {
 	all := r.pool.AllResolvers()
 	alen := len(all)
 	ch := make(chan *dns.Msg, alen)
+	var msglock sync.Mutex
 	msgsToRes := make(map[string]*resolver)
 
-	send := func(res *resolver) {
-		msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
-		msgsToRes[xchgKey(msg.Id, msg.Question[0].Name)] = res
-		r.writeReq(&request{
-			Res:    res,
-			Msg:    msg,
-			Result: ch,
-		})
-	}
+	go func() {
+		var count int
 
-	var count int
-	for _, res := range all {
-		send(res)
-		count++
-		if count == 100 {
-			count = 0
-			time.Sleep(100 * time.Millisecond)
+		for _, res := range all {
+			msg := QueryMsg("o-o.myaddr.l.google.com", dns.TypeTXT)
+			key := xchgKey(msg.Id, msg.Question[0].Name)
+			msglock.Lock()
+			msgsToRes[key] = res
+			msglock.Unlock()
+			res.writeReq(&request{
+				Res:    res,
+				Msg:    msg,
+				Result: ch,
+			})
+
+			count++
+			if count == 250 {
+				count = 0
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
-	}
+	}()
 
 	for i := 0; i < alen; i++ {
 		resp := <-ch
 		// pull the resolver associated with this message
 		key := xchgKey(resp.Id, resp.Question[0].Name)
+
+		msglock.Lock()
 		res, found := msgsToRes[key]
 		if !found {
+			msglock.Unlock()
 			continue
 		}
 		delete(msgsToRes, key)
+		msglock.Unlock()
 		// check if the resolver responded, but did not return a successful response
 		if resp.Rcode != dns.RcodeSuccess || (!resp.Authoritative && !resp.RecursionAvailable) {
 			if res != nil {

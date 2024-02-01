@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2022-2023. All rights reserved.
+// Copyright © by Jeff Foley 2022-2024. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -41,46 +41,51 @@ func newRandomSelector() *randomSelector {
 
 // GetResolver performs random selection on the pool of resolvers.
 func (r *randomSelector) GetResolver() *resolver {
-	var low int
+	max := r.maxQPS()
+	if max == -1 {
+		return nil
+	}
+	sel := rand.Intn(max)
+
+	r.Lock()
+	defer r.Unlock()
+
+	var cur int
 	var chosen *resolver
 loop:
-	for _, res := range r.randList() {
+	for _, res := range r.list {
 		select {
 		case <-res.done:
 			continue loop
 		default:
 		}
-		if cur := res.xchgs.len(); chosen == nil || cur < low {
+
+		cur += res.qps
+		if sel < cur {
 			chosen = res
-			low = cur
-		}
-		if low == 0 {
 			break
 		}
 	}
 	return chosen
 }
 
-func (r *randomSelector) randList() []*resolver {
+func (r *randomSelector) maxQPS() int {
 	r.Lock()
 	defer r.Unlock()
 
-	rlen := len(r.list)
-	if rlen == 0 {
-		return nil
+	if len(r.list) == 0 {
+		return -1
 	}
 
-	slen := min(rlen, 25)
-	var list []*resolver
-	for a, i, j := 0, 0, rand.Intn(rlen); i < rlen && a < slen; i, j = i+1, (j+1)%rlen {
+	var max int
+	for _, res := range r.list {
 		select {
-		case <-r.list[j].done:
+		case <-res.done:
 		default:
-			list = append(list, r.list[j])
-			a++
+			max += res.qps
 		}
 	}
-	return list
+	return max
 }
 
 func (r *randomSelector) LookupResolver(addr string) *resolver {

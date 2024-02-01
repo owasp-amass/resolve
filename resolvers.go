@@ -19,8 +19,6 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const headerSize = 12
-
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
 type Resolvers struct {
 	sync.Mutex
@@ -43,9 +41,12 @@ type Resolvers struct {
 
 type resolver struct {
 	done    chan struct{}
+	pool    *Resolvers
+	queue   queue.Queue
 	xchgs   *xchgMgr
 	address *net.UDPAddr
 	qps     int
+	rate    ratelimit.Limiter
 	stats   *stats
 }
 
@@ -59,11 +60,15 @@ func (r *Resolvers) initializeResolver(qps int, addr string) *resolver {
 	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
 		res = &resolver{
 			done:    make(chan struct{}, 1),
+			pool:    r,
+			queue:   queue.NewQueue(),
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
 			qps:     qps,
+			rate:    ratelimit.New(qps),
 			stats:   new(stats),
 		}
+		go res.processRequests()
 	}
 	return res
 }
@@ -179,8 +184,8 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 			addr = net.JoinHostPort(addr, "53")
 		}
 		// check that this address will not create a duplicate resolver
-		if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
-			if _, found := r.rmap[uaddr.IP.String()]; !found {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if _, found := r.rmap[host]; !found {
 				if res := r.initializeResolver(qps, addr); res != nil {
 					r.rmap[res.address.IP.String()] = struct{}{}
 					r.pool.AddResolver(res)
@@ -266,18 +271,12 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 	default:
 	}
 
-	ch := r.QueryChan(ctx, msg)
-
-	select {
-	case <-ctx.Done():
-		return msg, errors.New("the context expired")
-	case resp := <-ch:
-		var err error
-		if resp == nil {
-			err = errors.New("query failed")
-		}
-		return resp, err
+	var err error
+	resp := <-r.QueryChan(ctx, msg)
+	if resp == nil {
+		err = errors.New("query failed")
 	}
+	return resp, err
 }
 
 func (r *Resolvers) enforceMaxQPS() {
@@ -287,17 +286,20 @@ loop:
 		case <-r.done:
 			break loop
 		case <-r.queue.Signal():
-			if r.rate != nil {
-				r.rate.Take()
+			element, found := r.queue.Next()
+			if !found {
+				continue loop
 			}
 
-			if e, yes := r.queue.Next(); yes {
-				if req, ok := e.(*request); ok {
-					if res := r.pool.GetResolver(); res != nil {
-						req.Res = res
-						r.writeReq(req)
-						continue loop
-					}
+			if r.rate != nil {
+				_ = r.rate.Take()
+			}
+
+			if req, ok := element.(*request); ok {
+				if res := r.pool.GetResolver(); res != nil {
+					req.Res = res
+					res.queue.Append(req)
+				} else {
 					req.errNoResponse()
 					req.release()
 				}
@@ -322,8 +324,8 @@ func (r *Resolvers) processResponses() {
 		}
 
 		r.resps.Process(func(element interface{}) {
-			if response, ok := element.(*resp); ok && r != nil {
-				r.processSingleResp(response)
+			if response, ok := element.(*resp); ok && response != nil {
+				go r.processSingleResp(response)
 			}
 		})
 	}
@@ -331,13 +333,13 @@ func (r *Resolvers) processResponses() {
 
 func (r *Resolvers) processSingleResp(response *resp) {
 	var res *resolver
-	addr := response.Addr.IP.String()
+	addr, _, _ := net.SplitHostPort(response.Addr.String())
 
 	if res = r.pool.LookupResolver(addr); res == nil {
-		detector := r.getDetectionResolver()
-
-		if detector != nil && addr == detector.address.IP.String() {
-			res = detector
+		if detector := r.getDetectionResolver(); detector != nil {
+			if detector.address.IP.String() == addr {
+				res = detector
+			}
 		}
 	}
 	if res == nil {
@@ -362,7 +364,14 @@ func (r *Resolvers) processSingleResp(response *resp) {
 }
 
 func (r *Resolvers) timeouts() {
-	for {
+	r.Lock()
+	d := r.timeout / 2
+	r.Unlock()
+
+	t := time.NewTicker(d)
+	defer t.Stop()
+
+	for range t.C {
 		select {
 		case <-r.done:
 			return
@@ -389,24 +398,33 @@ func (r *Resolvers) timeouts() {
 				}
 			}
 		}
-		// wait a bit before checking again
-		r.Lock()
-		d := r.timeout / 2
-		r.Unlock()
-		if d > 0 {
-			time.Sleep(d)
-		}
 	}
 }
 
-func (r *Resolvers) writeReq(req *request) {
-	res := req.Res
+func (r *resolver) processRequests() {
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-r.queue.Signal():
+		}
+
+		r.queue.Process(func(element interface{}) {
+			if req, ok := element.(*request); ok && req != nil {
+				_ = r.rate.Take()
+				go r.writeReq(req)
+			}
+		})
+	}
+}
+
+func (r *resolver) writeReq(req *request) {
 	msg := req.Msg.Copy()
 	req.Timestamp = time.Now()
 
-	if res.xchgs.add(req) == nil {
-		if err := r.conns.WriteMsg(msg, res.address); err != nil {
-			_ = res.xchgs.remove(msg.Id, msg.Question[0].Name)
+	if r.xchgs.add(req) == nil {
+		if err := r.pool.conns.WriteMsg(msg, r.address); err != nil {
+			_ = r.xchgs.remove(msg.Id, msg.Question[0].Name)
 			req.errNoResponse()
 			req.release()
 		}
