@@ -62,13 +62,6 @@ func xchgKey(id uint16, name string) string {
 	return fmt.Sprintf("%d:%s", id, strings.ToLower(RemoveLastDot(name)))
 }
 
-func (r *xchgMgr) len() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return len(r.xchgs)
-}
-
 func (r *xchgMgr) setTimeout(d time.Duration) {
 	r.Lock()
 	defer r.Unlock()

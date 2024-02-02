@@ -73,9 +73,22 @@ func (c *connections) Add() error {
 	var err error
 	var conn net.PacketConn
 
-	if runtime.GOOS == "linux" {
-		conn, err = c.linuxListenPacket()
-	} else {
+	switch runtime.GOOS {
+	case "android":
+		fallthrough
+	case "linux":
+		fallthrough
+	case "darwin":
+		fallthrough
+	case "freebsd":
+		fallthrough
+	case "netbsd":
+		fallthrough
+	case "openbsd":
+		fallthrough
+	case "solaris":
+		conn, err = c.unixListenPacket()
+	default:
 		conn, err = net.ListenPacket("udp", ":0")
 	}
 
@@ -87,7 +100,7 @@ func (c *connections) Add() error {
 	return err
 }
 
-func (c *connections) linuxListenPacket() (net.PacketConn, error) {
+func (c *connections) unixListenPacket() (net.PacketConn, error) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			var operr error
