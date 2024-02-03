@@ -5,18 +5,14 @@
 package resolve
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/caffix/queue"
 	"github.com/miekg/dns"
-	"golang.org/x/sys/unix"
 )
 
 const headerSize = 12
@@ -74,7 +70,7 @@ func (r *connections) Close() {
 }
 
 func (r *connections) rotations() {
-	t := time.NewTicker(time.Minute)
+	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 
 	for {
@@ -121,48 +117,19 @@ func (r *connections) Next() net.PacketConn {
 }
 
 func (r *connections) Add() error {
-	var err error
-	var conn net.PacketConn
-
-	if runtime.GOOS == "linux" {
-		conn, err = r.linuxListenPacket()
-	} else {
-		conn, err = net.ListenPacket("udp", ":0")
+	conn, err := r.ListenPacket()
+	if err != nil {
+		return err
 	}
 
-	if err == nil {
-		_ = conn.SetDeadline(time.Time{})
-		c := &connection{
-			conn: conn,
-			done: make(chan struct{}),
-		}
-		r.conns = append(r.conns, c)
-		go r.responses(c)
+	_ = conn.SetDeadline(time.Time{})
+	c := &connection{
+		conn: conn,
+		done: make(chan struct{}),
 	}
-	return err
-}
-
-func (r *connections) linuxListenPacket() (net.PacketConn, error) {
-	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			var operr error
-
-			if err := c.Control(func(fd uintptr) {
-				operr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			}); err != nil {
-				return err
-			}
-
-			return operr
-		},
-	}
-
-	laddr := ":0"
-	if len(r.conns) > 0 {
-		laddr = r.conns[0].conn.LocalAddr().String()
-	}
-
-	return lc.ListenPacket(context.Background(), "udp", laddr)
+	r.conns = append(r.conns, c)
+	go r.responses(c)
+	return nil
 }
 
 func (r *connections) WriteMsg(msg *dns.Msg, addr net.Addr) error {
