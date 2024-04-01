@@ -36,3 +36,17 @@ func RegisteredToFQDN(registered, fqdn string, callback func(domain string) bool
 		}
 	}
 }
+
+// SplitRegisteredToFQDN executes the provided callback routine for domain names, splitting
+// the registered domain into a prefix and suffix part and omitting the part in between.
+// The process stops if the callback routine returns true, indicating completion.
+func SplitRegisteredToFQDN(registered, fqdn string, callback func(prefix, suffix string) bool) {
+	base := len(strings.Split(registered, "."))
+	labels := strings.Split(fqdn, ".")
+
+	for i := 1; i <= len(labels)-base-1; i++ {
+		if callback(strings.Join(labels[:i], "."), strings.Join(labels[i+1:], ".")) {
+			break
+		}
+	}
+}
