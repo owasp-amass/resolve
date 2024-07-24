@@ -21,12 +21,14 @@ func TestUpdateRateLimiters(t *testing.T) {
 	tracker.Lock()
 	qps := tracker.qps
 	tracker.Unlock()
-	num := qps / 2
+	num := qps / 3
 	// set a large number of timeouts
 	for i := 0; i < num; i++ {
 		rt.Success(domain)
 	}
-	for i := 0; i < num; i++ {
+
+	max := tracker.qps - num
+	for i := 0; i < max; i++ {
 		rt.Timeout(domain)
 	}
 	time.Sleep(rateUpdateInterval + (rateUpdateInterval / 2))

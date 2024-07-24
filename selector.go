@@ -44,8 +44,14 @@ func (r *randomSelector) GetResolver() *resolver {
 	r.Lock()
 	defer r.Unlock()
 
+	if l := len(r.list); l == 0 {
+		return nil
+	} else if l == 1 {
+		return r.list[0]
+	}
+
 	var chosen *resolver
-	sel := rand.Intn(len(r.list) + 1)
+	sel := rand.Intn(len(r.list))
 loop:
 	for _, res := range r.list[sel:] {
 		select {

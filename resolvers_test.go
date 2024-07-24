@@ -29,7 +29,7 @@ func TestInitializeResolver(t *testing.T) {
 
 func TestSetTimeout(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(1000, "8.8.8.8")
+	_ = r.AddResolvers(maxQPSPerNameserver, "8.8.8.8")
 	defer r.Stop()
 
 	timeout := 2 * time.Second

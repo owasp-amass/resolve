@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	maxQPSPerNameserver  = 250
-	numIntervalSeconds   = 2
-	rateUpdateInterval   = numIntervalSeconds * time.Second
-	maxTimeoutPercentage = 0.5
+	startQPSPerNameserver = 15
+	maxQPSPerNameserver   = 250
+	numIntervalSeconds    = 2
+	rateUpdateInterval    = numIntervalSeconds * time.Second
+	maxTimeoutPercentage  = 0.5
 )
 
 type rateTrack struct {
@@ -52,8 +53,8 @@ func NewRateTracker() *RateTracker {
 
 func newRateTrack() *rateTrack {
 	return &rateTrack{
-		qps:  maxQPSPerNameserver,
-		rate: ratelimit.New(maxQPSPerNameserver),
+		qps:  startQPSPerNameserver,
+		rate: ratelimit.New(startQPSPerNameserver),
 	}
 }
 
@@ -135,6 +136,9 @@ func (rt *rateTrack) update() {
 		}
 	} else {
 		rt.qps += 1
+		if rt.qps > maxQPSPerNameserver {
+			rt.qps = maxQPSPerNameserver
+		}
 	}
 	// update the QPS rate limiter and reset counters
 	rt.rate = ratelimit.New(rt.qps)
