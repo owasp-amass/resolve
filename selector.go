@@ -41,51 +41,23 @@ func newRandomSelector() *randomSelector {
 
 // GetResolver performs random selection on the pool of resolvers.
 func (r *randomSelector) GetResolver() *resolver {
-	max := r.maxQPS()
-	if max == -1 {
-		return nil
-	}
-	sel := rand.Intn(max)
-
 	r.Lock()
 	defer r.Unlock()
 
-	var cur int
 	var chosen *resolver
+	sel := rand.Intn(len(r.list) + 1)
 loop:
-	for _, res := range r.list {
+	for _, res := range r.list[sel:] {
 		select {
 		case <-res.done:
 			continue loop
 		default:
 		}
 
-		cur += res.qps
-		if sel < cur {
-			chosen = res
-			break
-		}
+		chosen = res
+		break
 	}
 	return chosen
-}
-
-func (r *randomSelector) maxQPS() int {
-	r.Lock()
-	defer r.Unlock()
-
-	if len(r.list) == 0 {
-		return -1
-	}
-
-	var max int
-	for _, res := range r.list {
-		select {
-		case <-res.done:
-		default:
-			max += res.qps
-		}
-	}
-	return max
 }
 
 func (r *randomSelector) LookupResolver(addr string) *resolver {

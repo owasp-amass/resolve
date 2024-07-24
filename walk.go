@@ -31,7 +31,7 @@ func (r *Resolvers) NsecTraversal(ctx context.Context, domain string) ([]*dns.NS
 		found = false
 		var nsec *dns.NSEC
 
-		nsec, err = r.searchGap(ctx, next, domain)
+		nsec, err = r.searchGap(ctx, next)
 		if err == nil {
 			if _, yes := names[nsec.NextDomain]; yes {
 				break
@@ -49,7 +49,7 @@ func (r *Resolvers) NsecTraversal(ctx context.Context, domain string) ([]*dns.NS
 	return results, err
 }
 
-func (r *Resolvers) searchGap(ctx context.Context, name, domain string) (*dns.NSEC, error) {
+func (r *Resolvers) searchGap(ctx context.Context, name string) (*dns.NSEC, error) {
 	for i := 0; i < maxQueryAttempts; i++ {
 		resp, err := r.QueryBlocking(ctx, WalkMsg(name, dns.TypeNSEC))
 		if err != nil || resp.Rcode == dns.RcodeNameError {
