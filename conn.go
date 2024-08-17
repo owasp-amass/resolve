@@ -37,6 +37,10 @@ type connections struct {
 }
 
 func newConnections(cpus int, resps queue.Queue) *connections {
+	if cpus < 100 {
+		cpus = 100
+	}
+
 	conns := &connections{
 		resps: resps,
 		done:  make(chan struct{}),
@@ -70,7 +74,7 @@ func (r *connections) Close() {
 }
 
 func (r *connections) rotations() {
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 
 	for {
@@ -142,7 +146,9 @@ func (r *connections) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 
 		if conn := r.Next(); conn != nil {
 			_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-			if n, err = conn.WriteTo(out, addr); err == nil && n < len(out) {
+
+			n, err = conn.WriteTo(out, addr)
+			if err == nil && n < len(out) {
 				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 			}
 		}
