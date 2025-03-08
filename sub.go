@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2021-2024. All rights reserved.
+// Copyright © by Jeff Foley 2017-2025. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -30,7 +30,7 @@ loop:
 				if len(resp.Answer) == 0 {
 					continue loop
 				}
-				if d := AnswersByType(ExtractAnswers(resp), dns.TypeNS); len(d) > 0 {
+				if d := AnswersByType(resp, dns.TypeNS); len(d) > 0 {
 					domain = sub
 					break loop
 				}

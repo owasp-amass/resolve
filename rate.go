@@ -225,10 +225,10 @@ func (r *RateTracker) getNameservers(domain string) []string {
 	}
 
 	var servers []string
-	if m, _, err := client.Exchange(QueryMsg(domain, dns.TypeNS), "8.8.8.8:53"); err == nil {
-		if ans := ExtractAnswers(m); len(ans) > 0 {
-			for _, rr := range AnswersByType(ans, dns.TypeNS) {
-				servers = append(servers, strings.ToLower(RemoveLastDot(rr.Data)))
+	if m, _, err := client.Exchange(QueryMsg(domain, dns.TypeNS), "8.8.8.8:53"); err == nil && m != nil {
+		for _, rr := range AnswersByType(m, dns.TypeNS) {
+			if ns, ok := rr.(*dns.NS); ok {
+				servers = append(servers, strings.ToLower(RemoveLastDot(ns.Ns)))
 			}
 		}
 	}

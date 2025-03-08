@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2024. All rights reserved.
+// Copyright © by Jeff Foley 2017-2025. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -38,7 +38,7 @@ var wildcardQueryTypes = []uint16{
 type wildcard struct {
 	sync.Mutex
 	Detected bool
-	Answers  []*ExtractedAnswer
+	Answers  []dns.RR
 }
 
 // UnlikelyName takes a subdomain name and returns an unlikely DNS name within that subdomain.
@@ -172,7 +172,7 @@ func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
 		set := stringset.New()
 		defer set.Close()
 
-		insertRecordData(set, ExtractAnswers(resp))
+		insertRecordData(set, resp.Answer)
 		intersectRecordData(set, w.Answers)
 		if set.Len() > 0 {
 			return w.Detected
@@ -182,9 +182,9 @@ func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
 }
 
 // Determines if the provided subdomain has a DNS wildcard.
-func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*ExtractedAnswer) {
+func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.RR) {
 	var detected bool
-	var answers []*ExtractedAnswer
+	var answers []dns.RR
 
 	set := stringset.New()
 	defer set.Close()
@@ -198,7 +198,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 			}
 		}
 
-		var ans []*ExtractedAnswer
+		var ans []dns.RR
 		for _, t := range wildcardQueryTypes {
 			if a := r.makeQueryAttempts(ctx, name, t); len(a) > 0 {
 				detected = true
@@ -217,14 +217,22 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 	already := stringset.New()
 	defer already.Close()
 
-	var final []*ExtractedAnswer
+	var final []dns.RR
 	// Create the slice of answers common across all the responses from unlikely name queries
 	for _, a := range answers {
-		a.Data = strings.Trim(a.Data, ".")
+		var data string
 
-		if set.Has(a.Data) && !already.Has(a.Data) {
+		if a.Header().Rrtype == dns.TypeCNAME {
+			data = strings.Trim((a.(*dns.CNAME)).Target, ".")
+		} else if a.Header().Rrtype == dns.TypeA {
+			data = (a.(*dns.A)).A.String()
+		} else if a.Header().Rrtype == dns.TypeAAAA {
+			data = (a.(*dns.AAAA)).AAAA.String()
+		}
+
+		if set.Has(data) && !already.Has(data) {
 			final = append(final, a)
-			already.Insert(a.Data)
+			already.Insert(data)
 		}
 	}
 	if detected {
@@ -233,7 +241,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []*Extr
 	return detected, final
 }
 
-func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []*ExtractedAnswer {
+func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []dns.RR {
 	ch := make(chan *dns.Msg, 1)
 	detector := r.getDetectionResolver()
 loop:
@@ -257,29 +265,41 @@ loop:
 				if len(resp.Answer) == 0 {
 					break loop
 				}
-				return ExtractAnswers(resp)
+				return resp.Answer
 			}
 		}
 	}
 	return nil
 }
 
-func intersectRecordData(set *stringset.Set, ans []*ExtractedAnswer) {
+func intersectRecordData(set *stringset.Set, ans []dns.RR) {
 	records := stringset.New()
 	defer records.Close()
 
 	for _, a := range ans {
-		records.Insert(strings.Trim(a.Data, "."))
+		if a.Header().Rrtype == dns.TypeCNAME {
+			records.Insert(strings.Trim((a.(*dns.CNAME)).Target, "."))
+		} else if a.Header().Rrtype == dns.TypeA {
+			records.Insert((a.(*dns.A)).A.String())
+		} else if a.Header().Rrtype == dns.TypeAAAA {
+			records.Insert((a.(*dns.AAAA)).AAAA.String())
+		}
 	}
 	set.Intersect(records)
 }
 
-func insertRecordData(set *stringset.Set, ans []*ExtractedAnswer) {
+func insertRecordData(set *stringset.Set, ans []dns.RR) {
 	records := stringset.New()
 	defer records.Close()
 
 	for _, a := range ans {
-		records.Insert(strings.Trim(a.Data, "."))
+		if a.Header().Rrtype == dns.TypeCNAME {
+			records.Insert(strings.Trim((a.(*dns.CNAME)).Target, "."))
+		} else if a.Header().Rrtype == dns.TypeA {
+			records.Insert((a.(*dns.A)).A.String())
+		} else if a.Header().Rrtype == dns.TypeAAAA {
+			records.Insert((a.(*dns.AAAA)).AAAA.String())
+		}
 	}
 	set.Union(records)
 }

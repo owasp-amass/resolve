@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2021-2024. All rights reserved.
+// Copyright © by Jeff Foley 2017-2025. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -6,7 +6,6 @@ package resolve
 
 import (
 	"net"
-	"strings"
 
 	"github.com/miekg/dns"
 )
@@ -64,162 +63,19 @@ func SetupOptions() *dns.OPT {
 	}
 }
 
-// ExtractedAnswer contains information from the DNS response Answer section.
-type ExtractedAnswer struct {
-	Name string
-	Type uint16
-	Data string
-}
-
 // AnswersByType returns only the answers from the DNS Answer section matching the provided type.
-func AnswersByType(answers []*ExtractedAnswer, qtype uint16) []*ExtractedAnswer {
-	var subset []*ExtractedAnswer
+func AnswersByType(msg *dns.Msg, qtype uint16) []dns.RR {
+	var subset []dns.RR
 
-	if answers == nil {
+	if len(msg.Answer) == 0 {
 		return subset
 	}
 
-	for _, a := range answers {
-		if a.Type == qtype {
+	for _, a := range msg.Answer {
+		if a.Header().Rrtype == qtype {
 			subset = append(subset, a)
 		}
 	}
+
 	return subset
-}
-
-// ExtractAnswers returns information from the DNS Answer section of the provided Msg in ExtractedAnswer type.
-func ExtractAnswers(msg *dns.Msg) []*ExtractedAnswer {
-	var data []*ExtractedAnswer
-
-	if msg == nil {
-		return data
-	}
-
-	for _, a := range msg.Answer {
-		var value string
-		switch a.Header().Rrtype {
-		case dns.TypeA:
-			value = parseAType(a)
-		case dns.TypeAAAA:
-			value = parseAAAAType(a)
-		case dns.TypeCNAME:
-			value = parseCNAMEType(a)
-		case dns.TypePTR:
-			value = parsePTRType(a)
-		case dns.TypeNS:
-			value = parseNSType(a)
-		case dns.TypeMX:
-			value = parseMXType(a)
-		case dns.TypeTXT:
-			value = parseTXTType(a)
-		case dns.TypeSOA:
-			value = parseSOAType(a)
-		case dns.TypeSRV:
-			value = parseSRVType(a)
-		}
-		if value != "" {
-			data = append(data, &ExtractedAnswer{
-				Name: strings.ToLower(RemoveLastDot(a.Header().Name)),
-				Type: a.Header().Rrtype,
-				Data: strings.TrimSpace(value),
-			})
-		}
-	}
-	return data
-}
-
-func parseAType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.A); ok {
-		if ip := net.ParseIP(t.A.String()); ip != nil {
-			value = ip.String()
-		}
-	}
-	return value
-}
-
-func parseAAAAType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.AAAA); ok {
-		if ip := net.ParseIP(t.AAAA.String()); ip != nil {
-			value = ip.String()
-		}
-	}
-	return value
-}
-
-func parseCNAMEType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.CNAME); ok {
-		name := RemoveLastDot(t.Target)
-
-		if _, ok := dns.IsDomainName(name); ok {
-			value = name
-		}
-	}
-	return value
-}
-
-func parsePTRType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.PTR); ok {
-		name := RemoveLastDot(t.Ptr)
-
-		if _, ok := dns.IsDomainName(name); ok {
-			value = name
-		}
-	}
-	return value
-}
-
-func parseNSType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.NS); ok {
-		name := RemoveLastDot(t.Ns)
-
-		if _, ok := dns.IsDomainName(name); ok {
-			value = name
-		}
-	}
-	return value
-}
-
-func parseMXType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.MX); ok {
-		name := RemoveLastDot(t.Mx)
-
-		if _, ok := dns.IsDomainName(name); ok {
-			value = name
-		}
-	}
-	return value
-}
-
-func parseTXTType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.TXT); ok {
-		value = strings.Join(t.Txt, " ")
-	}
-	return value
-}
-
-func parseSOAType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.SOA); ok {
-		value = t.Ns + "," + t.Mbox
-	}
-	return value
-}
-
-func parseSRVType(rr dns.RR) string {
-	var value string
-	if t, ok := rr.(*dns.SRV); ok {
-		name := RemoveLastDot(t.Target)
-
-		if _, ok := dns.IsDomainName(name); ok {
-			value = name
-		}
-	}
-	return value
 }

@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2024. All rights reserved.
+// Copyright © by Jeff Foley 2017-2025. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -61,7 +61,9 @@ func TestPoolQuery(t *testing.T) {
 		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
 	}
 	for i := 0; i < num; i++ {
-		if ans := ExtractAnswers(<-ch); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
+		if m := <-ch; m == nil || len(m.Answer) == 0 {
+			failures++
+		} else if rrs := AnswersByType(m, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
 			failures++
 		}
 	}
@@ -178,9 +180,11 @@ func TestQuery(t *testing.T) {
 	var success bool
 	for i := 0; i < 5; i++ {
 		r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
-		if ans := ExtractAnswers(<-ch); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
-			success = true
-			break
+		if m := <-ch; m != nil && len(m.Answer) > 0 {
+			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+				success = true
+				break
+			}
 		}
 	}
 	if !success {
@@ -205,9 +209,11 @@ func TestQueryChan(t *testing.T) {
 	var success bool
 	for i := 0; i < 5; i++ {
 		ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
-		if ans := ExtractAnswers(<-ch); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
-			success = true
-			break
+		if m := <-ch; m != nil && len(m.Answer) > 0 {
+			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+				success = true
+				break
+			}
 		}
 	}
 	if !success {
@@ -233,10 +239,12 @@ func TestQueryBlocking(t *testing.T) {
 	var success bool
 	ctx, cancel := context.WithCancel(context.Background())
 	for i := 0; i < 5; i++ {
-		if resp, err := r.QueryBlocking(ctx, QueryMsg(name, 1)); err == nil {
-			if ans := ExtractAnswers(resp); len(ans) > 0 && ans[0].Data == "192.168.1.1" {
-				success = true
-				break
+		if resp, err := r.QueryBlocking(ctx, QueryMsg(name, 1)); err == nil && resp != nil {
+			if len(resp.Answer) > 0 {
+				if rrs := AnswersByType(resp, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+					success = true
+					break
+				}
 			}
 		}
 	}
@@ -277,7 +285,7 @@ func TestQueryTimeout(t *testing.T) {
 	defer r.Stop()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
-	if err == nil && len(ExtractAnswers(resp)) != 0 {
+	if err == nil && len(resp.Answer) > 0 {
 		t.Errorf("the query did not fail as expected")
 	}
 }
@@ -302,7 +310,7 @@ func TestEdgeCases(t *testing.T) {
 	}
 
 	r.Stop()
-	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", 1)); err == nil && len(ExtractAnswers(resp)) > 0 {
+	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", 1)); err == nil && len(resp.Answer) > 0 {
 		t.Errorf("query was successful when provided a stopped Resolver")
 	}
 }
@@ -373,8 +381,10 @@ func TestTCPExchange(t *testing.T) {
 	})
 
 	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
-		if ans := ExtractAnswers(resp); len(ans) == 0 || ans[0].Data != "192.168.1.1" {
-			t.Errorf("the query did not return the expected IP address")
+		if len(resp.Answer) > 0 {
+			if rrs := AnswersByType(resp, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
+				t.Errorf("the query did not return the expected IP address")
+			}
 		}
 	} else {
 		t.Errorf("The TCP exchange process failed to handle the query for: %s", name)
