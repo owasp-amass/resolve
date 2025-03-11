@@ -20,6 +20,7 @@ const headerSize = 12
 type resp struct {
 	Msg  *dns.Msg
 	Addr net.Addr
+	At   time.Time
 }
 
 type connection struct {
@@ -173,6 +174,7 @@ func (r *connections) responses(c *connection) {
 				r.resps.Append(&resp{
 					Msg:  m,
 					Addr: addr,
+					At:   time.Now(),
 				})
 			}
 		}

@@ -27,7 +27,8 @@ var reqPool = sync.Pool{
 
 type request struct {
 	Res       *resolver
-	Timestamp time.Time
+	SentAt    time.Time
+	RecvAt    time.Time
 	Msg, Resp *dns.Msg
 	Result    chan *dns.Msg
 }
@@ -81,7 +82,7 @@ func (r *xchgMgr) add(req *request) error {
 	return nil
 }
 
-func (r *xchgMgr) updateTimestamp(id uint16, name string) {
+func (r *xchgMgr) updateSentAt(id uint16, name string) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -89,7 +90,7 @@ func (r *xchgMgr) updateTimestamp(id uint16, name string) {
 	if _, found := r.xchgs[key]; !found {
 		return
 	}
-	r.xchgs[key].Timestamp = time.Now()
+	r.xchgs[key].SentAt = time.Now()
 }
 
 func (r *xchgMgr) remove(id uint16, name string) *request {
@@ -110,7 +111,7 @@ func (r *xchgMgr) removeExpired() []*request {
 	now := time.Now()
 	var keys []string
 	for key, req := range r.xchgs {
-		if !req.Timestamp.IsZero() && now.After(req.Timestamp.Add(r.timeout)) {
+		if !req.SentAt.IsZero() && now.After(req.SentAt.Add(r.timeout)) {
 			keys = append(keys, key)
 		}
 	}

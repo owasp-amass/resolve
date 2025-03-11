@@ -136,6 +136,7 @@ func (r *Resolvers) SetTimeout(d time.Duration) {
 
 func (r *Resolvers) updateResolverTimeouts() {
 	all := r.pool.AllResolvers()
+
 	if r.detector != nil {
 		all = append(all, r.detector)
 	}
@@ -420,7 +421,7 @@ func (r *resolver) processRequests() {
 
 func (r *resolver) writeReq(req *request) {
 	msg := req.Msg.Copy()
-	req.Timestamp = time.Now()
+	req.SentAt = time.Now()
 
 	if r.xchgs.add(req) == nil {
 		if err := r.pool.conns.WriteMsg(msg, r.address); err != nil {
