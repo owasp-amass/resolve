@@ -357,7 +357,8 @@ func (r *Resolvers) processSingleResp(response *resp) {
 			req.Result <- req.Resp
 			req.Res.collectStats(req.Resp)
 			if r.servRates != nil {
-				r.servRates.Success(name)
+				delta := req.RecvAt.Sub(req.SentAt)
+				r.servRates.ReportResponseTime(name, delta)
 			}
 			req.release()
 		}
@@ -392,9 +393,6 @@ func (r *Resolvers) timeouts() {
 				for _, req := range res.xchgs.removeExpired() {
 					req.errNoResponse()
 					res.collectStats(req.Msg)
-					if r.servRates != nil {
-						r.servRates.Timeout(req.Msg.Question[0].Name)
-					}
 					req.release()
 				}
 			}

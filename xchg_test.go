@@ -44,18 +44,18 @@ func TestXchgUpdateTimestamp(t *testing.T) {
 	msg := QueryMsg(name, dns.TypeA)
 	req := &request{Msg: msg}
 
-	if !req.Timestamp.IsZero() {
+	if !req.SentAt.IsZero() {
 		t.Errorf("Expected the new request to have a zero value timestamp")
 	}
 	if err := xchg.add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
-	xchg.updateTimestamp(msg.Id, name)
+	xchg.updateSentAt(msg.Id, name)
 	// For complete coverage
-	xchg.updateTimestamp(msg.Id, "Bad Name")
+	xchg.updateSentAt(msg.Id, "Bad Name")
 
 	req = xchg.remove(msg.Id, msg.Question[0].Name)
-	if req == nil || req.Timestamp.IsZero() {
+	if req == nil || req.SentAt.IsZero() {
 		t.Errorf("Expected the updated request to not have a zero value timestamp")
 	}
 }
@@ -67,8 +67,8 @@ func TestXchgRemoveExpired(t *testing.T) {
 	for _, name := range names {
 		msg := QueryMsg(name, dns.TypeA)
 		if err := xchg.add(&request{
-			Msg:       msg,
-			Timestamp: time.Now(),
+			Msg:    msg,
+			SentAt: time.Now(),
 		}); err != nil {
 			t.Errorf("Failed to add the request")
 		}
@@ -77,8 +77,8 @@ func TestXchgRemoveExpired(t *testing.T) {
 	name := "vpn.caffix.net"
 	msg := QueryMsg(name, dns.TypeA)
 	if err := xchg.add(&request{
-		Msg:       msg,
-		Timestamp: time.Now().Add(3 * time.Second),
+		Msg:    msg,
+		SentAt: time.Now().Add(3 * time.Second),
 	}); err != nil {
 		t.Errorf("Failed to add the request")
 	}

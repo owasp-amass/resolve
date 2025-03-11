@@ -168,6 +168,8 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 		p.Pool.SetDetectionResolver(p.QPS, detector)
 		p.Detection = true
 	}
+
+	p.Pool.SetRateTracker(resolve.NewRateTracker())
 	return nil
 }
 

@@ -168,13 +168,14 @@ func (r *connections) responses(c *connection) {
 		default:
 		}
 		if n, addr, err := c.conn.ReadFrom(b); err == nil && n >= headerSize {
+			at := time.Now()
 			m := new(dns.Msg)
 
 			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
 				r.resps.Append(&resp{
 					Msg:  m,
 					Addr: addr,
-					At:   time.Now(),
+					At:   at,
 				})
 			}
 		}

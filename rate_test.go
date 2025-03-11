@@ -18,52 +18,27 @@ func TestUpdateRateLimiters(t *testing.T) {
 	rt.Take(domain)
 	tracker := rt.getDomainRateTracker(domain)
 
-	tracker.Lock()
-	qps := tracker.qps
-	tracker.Unlock()
-	num := qps / 3
-	// set a large number of timeouts
-	for i := 0; i < num; i++ {
-		rt.Success(domain)
-	}
-
-	max := tracker.qps - num
-	for i := 0; i < max; i++ {
-		rt.Timeout(domain)
-	}
-	time.Sleep(rateUpdateInterval + (rateUpdateInterval / 2))
+	rt.ReportResponseTime(domain, 500*time.Millisecond)
 
 	tracker.Lock()
-	qps2 := tracker.qps
+	limit := tracker.rate.Limit()
 	tracker.Unlock()
 	// the QPS should now be lower
-	if qps2 >= qps {
-		t.Errorf("Unexpected QPS, expected QPS lower than %d, got %d", qps, qps2)
+	if limit > 3 {
+		t.Errorf("Unexpected QPS, expected QPS lower than %d, got %f", 3, limit)
 	}
 
 	tracker.Lock()
-	succ := tracker.success
-	tout := tracker.timeout
+	tracker.avg = 50 * time.Millisecond
+	tracker.count = minUpdateSampleSize
 	tracker.Unlock()
-	// check that the counters have been cleared
-	if succ != 0 || tout != 0 {
-		t.Errorf("Unexpected counter values, Success Counter %d, Timeout Counter %d", succ, tout)
-	}
+	tracker.update()
 
 	tracker.Lock()
-	qps = tracker.qps
-	tracker.Unlock()
-	// set a large number of successes
-	for i := 0; i < qps; i++ {
-		rt.Success(domain)
-	}
-	time.Sleep(rateUpdateInterval + (rateUpdateInterval / 2))
-
-	tracker.Lock()
-	qps2 = tracker.qps
+	limit = tracker.rate.Limit()
 	tracker.Unlock()
 	// the QPS should now be higher
-	if qps2 <= qps {
-		t.Errorf("Unexpected QPS, expected QPS higher than %d, got %d", qps, qps2)
+	if limit < 20 || limit > 21 {
+		t.Errorf("Unexpected QPS, expected QPS of %d, got %f", 20, limit)
 	}
 }

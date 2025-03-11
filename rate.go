@@ -5,29 +5,30 @@
 package resolve
 
 import (
+	"context"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
-	"go.uber.org/ratelimit"
 	"golang.org/x/net/publicsuffix"
+	"golang.org/x/time/rate"
 )
 
 const (
-	startQPSPerNameserver = 10
-	maxQPSPerNameserver   = 100
-	numIntervalSeconds    = 2
-	rateUpdateInterval    = numIntervalSeconds * time.Second
-	maxTimeoutPercentage  = 0.5
+	maxQPSPerNameserver = 100
+	numIntervalSeconds  = 5
+	rateUpdateInterval  = numIntervalSeconds * time.Second
+	minUpdateSampleSize = 10
 )
 
 type rateTrack struct {
 	sync.Mutex
-	qps     int
-	rate    ratelimit.Limiter
-	success int
-	timeout int
+	rate  *rate.Limiter
+	avg   time.Duration
+	count int
+	first bool
 }
 
 type RateTracker struct {
@@ -52,9 +53,11 @@ func NewRateTracker() *RateTracker {
 }
 
 func newRateTrack() *rateTrack {
+	limit := rate.Every(100 * time.Millisecond)
+
 	return &rateTrack{
-		qps:  startQPSPerNameserver,
-		rate: ratelimit.New(startQPSPerNameserver),
+		rate:  rate.NewLimiter(limit, 1),
+		first: true,
 	}
 }
 
@@ -75,24 +78,24 @@ func (r *RateTracker) Take(sub string) {
 	rate := tracker.rate
 	tracker.Unlock()
 
-	rate.Take()
+	_ = rate.Wait(context.TODO())
 }
 
-// Success signals to the RateTracker that a request for the provided subdomain name was successful.
-func (r *RateTracker) Success(sub string) {
+// ReportResponseTime provides the response time for a request for the domain name provided in the sub parameter.
+func (r *RateTracker) ReportResponseTime(sub string, delta time.Duration) {
+	var average, count float64
 	tracker := r.getDomainRateTracker(sub)
 
 	tracker.Lock()
-	tracker.success++
-	tracker.Unlock()
-}
+	tracker.count++
+	count = float64(tracker.count)
+	average = float64(tracker.avg.Milliseconds())
+	average = ((average * (count - 1)) + float64(delta.Milliseconds())) / count
+	tracker.avg = time.Duration(math.Round(average)) * time.Millisecond
 
-// Timeout signals to the RateTracker that a request for the provided subdomain name timed out.
-func (r *RateTracker) Timeout(sub string) {
-	tracker := r.getDomainRateTracker(sub)
-
-	tracker.Lock()
-	tracker.timeout++
+	if tracker.first {
+		defer tracker.update()
+	}
 	tracker.Unlock()
 }
 
@@ -124,26 +127,18 @@ func (r *RateTracker) updateAllRateLimiters() {
 func (rt *rateTrack) update() {
 	rt.Lock()
 	defer rt.Unlock()
-	// check if this rate tracker has already been updated
-	if rt.success == 0 && rt.timeout == 0 {
+
+	if rt.first {
+		rt.first = false
+	} else if rt.count < minUpdateSampleSize {
 		return
 	}
-	// timeouts in excess of maxTimeoutPercentage indicate a need to slow down
-	if float64(rt.timeout)/float64(rt.success+rt.timeout) > maxTimeoutPercentage {
-		rt.qps -= 1
-		if rt.qps <= 0 {
-			rt.qps = 1
-		}
-	} else {
-		rt.qps += 1
-		if rt.qps > maxQPSPerNameserver {
-			rt.qps = maxQPSPerNameserver
-		}
-	}
+
+	limit := rate.Every(rt.avg)
 	// update the QPS rate limiter and reset counters
-	rt.rate = ratelimit.New(rt.qps)
-	rt.success = 0
-	rt.timeout = 0
+	rt.rate = rate.NewLimiter(limit, 1)
+	rt.avg = 0
+	rt.count = 0
 }
 
 func (r *RateTracker) getDomainRateTracker(sub string) *rateTrack {
