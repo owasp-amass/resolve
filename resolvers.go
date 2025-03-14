@@ -26,7 +26,6 @@ type Resolvers struct {
 	log       *log.Logger
 	conns     *connections
 	pool      selector
-	rmap      map[string]struct{}
 	wildcards map[string]*wildcard
 	queue     queue.Queue
 	resps     queue.Queue
@@ -49,7 +48,7 @@ type resolver struct {
 	stats   *stats
 }
 
-func (r *Resolvers) initializeResolver(qps int, addr string) *resolver {
+func (r *Resolvers) initializeResolver(addr string) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
@@ -63,7 +62,7 @@ func (r *Resolvers) initializeResolver(qps int, addr string) *resolver {
 			queue:   queue.NewQueue(),
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
-			qps:     qps,
+			qps:     20,
 			rate:    newRateTrack(),
 			stats:   new(stats),
 		}
@@ -85,6 +84,13 @@ func (r *resolver) stop() {
 		req.errNoResponse()
 		req.release()
 	}
+
+	if !r.pool.maxSet {
+		r.pool.Lock()
+		defer r.pool.Unlock()
+		r.pool.qps -= r.qps
+		r.pool.rate.SetLimit(rate.Limit(r.pool.qps))
+	}
 }
 
 // NewResolvers initializes a Resolvers.
@@ -94,8 +100,7 @@ func NewResolvers() *Resolvers {
 		done:      make(chan struct{}, 1),
 		log:       log.New(io.Discard, "", 0),
 		conns:     newConnections(runtime.NumCPU(), responses),
-		pool:      newRandomSelector(),
-		rmap:      make(map[string]struct{}),
+		pool:      newAuthNSSelector(),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		resps:     responses,
@@ -160,42 +165,39 @@ func (r *Resolvers) SetMaxQPS(qps int) {
 	if qps > 0 {
 		r.qps = qps
 		r.maxSet = true
-		r.rate = rate.NewLimiter(rate.Limit(qps), 1)
-		return
+		r.rate.SetLimit(rate.Limit(qps))
 	}
 }
 
 // AddResolvers initializes and adds new resolvers to the pool of resolvers.
-func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
-	r.Lock()
-	defer r.Unlock()
-
-	if qps == 0 {
-		return errors.New("failed to provide a maximum number of queries per second greater than zero")
+func (r *Resolvers) AddResolvers(addrs ...string) error {
+	if sel, ok := r.pool.(*authNSSelector); ok {
+		sel.Close()
+		r.pool = newRandomSelector()
 	}
 
+	r.Lock()
 	for _, addr := range addrs {
 		if _, _, err := net.SplitHostPort(addr); err != nil {
 			// add the default port number to the IP address
 			addr = net.JoinHostPort(addr, "53")
 		}
 		// check that this address will not create a duplicate resolver
-		if host, _, err := net.SplitHostPort(addr); err == nil {
-			if _, found := r.rmap[host]; !found {
-				if res := r.initializeResolver(qps, addr); res != nil {
-					r.rmap[res.address.IP.String()] = struct{}{}
-					r.pool.AddResolver(res)
-					if !r.maxSet {
-						r.qps += qps
-					}
-				}
+		if res := r.pool.LookupResolver(addr); res != nil {
+			continue
+		}
+		if res := r.initializeResolver(addr); res != nil {
+			r.pool.AddResolver(res)
+			if !r.maxSet {
+				r.qps += 20
 			}
 		}
 	}
-	// create the new rate limiter for the updated QPS
+	// update the new rate limiter for the new QPS
 	if !r.maxSet {
-		r.rate = rate.NewLimiter(rate.Limit(r.qps), 1)
+		r.rate.SetLimit(rate.Limit(r.qps))
 	}
+	r.Unlock()
 	return nil
 }
 
@@ -215,9 +217,6 @@ func (r *Resolvers) Stop() {
 	}
 
 	for _, res := range all {
-		if !r.maxSet {
-			r.qps -= res.qps
-		}
 		res.stop()
 	}
 	r.pool.Close()
@@ -286,7 +285,8 @@ loop:
 				name := req.Msg.Question[0].Name
 
 				if res := r.pool.GetResolver(name); res != nil {
-					go r.appendToResolverQueue(res, req)
+					req.Res = res
+					res.queue.Append(req)
 				} else {
 					req.errNoResponse()
 					req.release()
@@ -301,12 +301,6 @@ loop:
 			req.release()
 		}
 	})
-}
-
-func (r *Resolvers) appendToResolverQueue(res *resolver, req *request) {
-	req.Res = res
-	res.rate.Take()
-	res.queue.Append(req)
 }
 
 func (r *Resolvers) processResponses() {
@@ -351,7 +345,7 @@ func (r *Resolvers) processSingleResp(response *resp) {
 			req.Res.collectStats(req.Resp)
 
 			delta := req.RecvAt.Sub(req.SentAt)
-			req.Res.rate.ReportResponseTime(name, delta)
+			req.Res.rate.ReportResponseTime(delta)
 			req.release()
 		}
 	}
@@ -430,7 +424,7 @@ func (r *resolver) processRequests() {
 		r.queue.Process(func(element interface{}) {
 			if req, ok := element.(*request); ok && req != nil {
 				r.rate.Take()
-				go r.writeReq(req)
+				r.writeReq(req)
 			}
 		})
 	}

@@ -15,7 +15,7 @@ import (
 
 func TestThresholdOptions(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(1000, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
 	var threshold uint64 = 500
@@ -25,7 +25,7 @@ func TestThresholdOptions(t *testing.T) {
 	})
 
 	r.Lock()
-	if r.options.ThresholdValue != threshold || r.pool.GetResolver().stats.CountTimeouts != true {
+	if r.options.ThresholdValue != threshold || r.pool.GetResolver("caffix.net").stats.CountTimeouts != true {
 		t.Errorf("failed to set the new threshold options throughout the resolver pool")
 	}
 	r.Unlock()
@@ -33,10 +33,10 @@ func TestThresholdOptions(t *testing.T) {
 
 func TestThresholdContinuousShutdown(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
-	res := r.pool.GetResolver()
+	res := r.pool.GetResolver("caffix.net")
 	time.Sleep(thresholdCheckInterval + time.Second)
 	select {
 	case <-res.done:
@@ -70,7 +70,7 @@ func TestThresholdContinuousShutdown(t *testing.T) {
 
 func TestThresholdCumulativeShutdown(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
 	r.SetThresholdOptions(&ThresholdOptions{
@@ -83,7 +83,7 @@ func TestThresholdCumulativeShutdown(t *testing.T) {
 		CountQueryRefusals:     true,
 	})
 
-	res := r.pool.GetResolver()
+	res := r.pool.GetResolver("caffix.net")
 
 	res.stats.Lock()
 	res.stats.Timeouts = 20
@@ -114,7 +114,7 @@ func TestCollectStats(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	r.SetThresholdOptions(&ThresholdOptions{
@@ -127,7 +127,7 @@ func TestCollectStats(t *testing.T) {
 		CountQueryRefusals:     true,
 	})
 
-	res := r.pool.GetResolver()
+	res := r.pool.GetResolver(name)
 	_, _ = r.QueryBlocking(context.Background(), QueryMsg("timeout.caffix.net", 1))
 	res.stats.Lock()
 	if res.stats.Timeouts != 1 || res.stats.LastSuccess != 1 {

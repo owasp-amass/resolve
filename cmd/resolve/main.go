@@ -151,7 +151,7 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 	if l := len(list); l == 0 || rpath != "" {
 		list = append(list, ResolverFileList(rpath)...)
 	}
-	if err := p.Pool.AddResolvers(p.QPS, list...); err != nil {
+	if err := p.Pool.AddResolvers(list...); err != nil {
 		p.Pool.Stop()
 		return fmt.Errorf("failed to add the resolvers at a QPS of %d: %v", p.QPS, err)
 	}
@@ -165,11 +165,10 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 			p.Pool.Stop()
 			return fmt.Errorf("failed to provide a valid IP address for DNS wildcard detection: %s", detector)
 		}
-		p.Pool.SetDetectionResolver(p.QPS, detector)
+		p.Pool.SetDetectionResolver(detector)
 		p.Detection = true
 	}
 
-	p.Pool.SetRateTracker(resolve.NewRateTracker())
 	return nil
 }
 

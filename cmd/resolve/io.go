@@ -16,26 +16,6 @@ import (
 	"github.com/owasp-amass/resolve"
 )
 
-var resolvers = []string{
-	"8.8.8.8",        // Google
-	"1.1.1.1",        // Cloudflare
-	"9.9.9.9",        // Quad9
-	"208.67.222.222", // Cisco OpenDNS
-	"84.200.69.80",   // DNS.WATCH
-	"64.6.64.6",      // Neustar DNS
-	"8.26.56.26",     // Comodo Secure DNS
-	"205.171.3.65",   // Level3
-	"134.195.4.2",    // OpenNIC
-	"185.228.168.9",  // CleanBrowsing
-	"76.76.19.19",    // Alternate DNS
-	"37.235.1.177",   // FreeDNS
-	"77.88.8.1",      // Yandex.DNS
-	"94.140.14.140",  // AdGuard
-	"38.132.106.139", // CyberGhost
-	"74.82.42.42",    // Hurricane Electric
-	"76.76.2.0",      // ControlD
-}
-
 // CommaSep implements the flag.Value interface.
 type CommaSep []string
 
@@ -77,7 +57,6 @@ func ResolverFileList(p string) []string {
 		}
 	}
 
-	set.InsertMany(resolvers...)
 	return set.Slice()
 }
 

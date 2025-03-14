@@ -22,7 +22,7 @@ func TestFirstProperSubdomain(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	expected := "sub.first.org"

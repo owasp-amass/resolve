@@ -184,15 +184,7 @@ func (r *authNSSelector) LookupResolver(addr string) *resolver {
 	return r.lookup[addr]
 }
 
-func (r *authNSSelector) AddResolver(res *resolver) {
-	r.Lock()
-	defer r.Unlock()
-
-	if _, found := r.lookup[res.address.IP.String()]; !found {
-		r.list = append(r.list, res)
-		r.lookup[res.address.IP.String()] = res
-	}
-}
+func (r *authNSSelector) AddResolver(res *resolver) {}
 
 func (r *authNSSelector) AllResolvers() []*resolver {
 	r.Lock()
@@ -228,8 +220,18 @@ func (r *authNSSelector) Close() {
 	r.Lock()
 	defer r.Unlock()
 
+	for _, res := range r.list {
+		select {
+		case <-res.done:
+		default:
+			res.stop()
+		}
+	}
+
 	r.list = nil
 	r.lookup = nil
+	r.domainToServers = nil
+	r.serverToResolver = nil
 }
 
 func (r *authNSSelector) getDomainResolver(sub string) *resolver {

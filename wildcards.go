@@ -74,12 +74,9 @@ func UnlikelyName(sub string) string {
 
 // WildcardDetected returns true when the provided DNS response could be a wildcard match.
 func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain string) bool {
-	if !r.goodDetector() {
-		return false
-	}
-
 	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
 	domain = strings.ToLower(RemoveLastDot(domain))
+
 	if labels := strings.Split(name, "."); len(labels) > len(strings.Split(domain, ".")) {
 		name = strings.Join(labels[1:], ".")
 	}
@@ -97,7 +94,7 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 }
 
 // SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
-func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
+func (r *Resolvers) SetDetectionResolver(addr string) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -107,13 +104,11 @@ func (r *Resolvers) SetDetectionResolver(qps int, addr string) {
 	}
 	// check that this address will not create a duplicate resolver
 	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
-		if _, found := r.rmap[uaddr.IP.String()]; found {
-			r.detector = r.pool.LookupResolver(uaddr.IP.String())
+		if d := r.pool.LookupResolver(uaddr.IP.String()); d != nil {
+			r.detector = d
 			return
 		}
-		if res := r.initializeResolver(qps, addr); res != nil {
-			r.rmap[res.address.IP.String()] = struct{}{}
-			r.pool.AddResolver(res)
+		if res := r.initializeResolver(addr); res != nil {
 			r.detector = res
 		}
 	}
@@ -124,23 +119,6 @@ func (r *Resolvers) getDetectionResolver() *resolver {
 	defer r.Unlock()
 
 	return r.detector
-}
-
-func (r *Resolvers) goodDetector() bool {
-	success := true
-
-	if d := r.getDetectionResolver(); d == nil {
-		success = false
-
-		if d = r.pool.GetResolver(); d != nil {
-			r.SetDetectionResolver(d.qps, d.address.String())
-
-			if r.detector != nil {
-				success = true
-			}
-		}
-	}
-	return success
 }
 
 func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
@@ -243,7 +221,12 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.R
 
 func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []dns.RR {
 	ch := make(chan *dns.Msg, 1)
+	defer close(ch)
+
 	detector := r.getDetectionResolver()
+	if detector == nil {
+		return nil
+	}
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
 		req := &request{

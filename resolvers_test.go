@@ -18,24 +18,24 @@ import (
 func TestInitializeResolver(t *testing.T) {
 	r := NewResolvers()
 
-	if res := r.initializeResolver(100, "192.168.1.1"); res == nil ||
+	if res := r.initializeResolver("192.168.1.1"); res == nil ||
 		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
-	if res := r.initializeResolver(100, "300.300.300.300"); res != nil {
+	if res := r.initializeResolver("300.300.300.300"); res != nil {
 		t.Errorf("failed to detect the invalid IP address provided")
 	}
 }
 
 func TestSetTimeout(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(maxQPSPerNameserver, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
 	timeout := 2 * time.Second
 	r.SetTimeout(timeout)
 
-	if r.timeout != timeout || r.pool.GetResolver().xchgs.timeout != timeout {
+	if r.timeout != timeout || r.pool.GetResolver("caffix.net").xchgs.timeout != timeout {
 		t.Errorf("failed to set the new timeout value throughout the resolver pool")
 	}
 }
@@ -51,7 +51,7 @@ func TestPoolQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(100, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	num := 1000
@@ -80,7 +80,7 @@ func TestLen(t *testing.T) {
 		t.Errorf("the length was greater than zero before adding DNS resolvers")
 	}
 	// Test that the length equals one after adding a single resolver
-	_ = r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 	if r.Len() != 1 {
 		t.Errorf("the length did not equal one after adding the first resolver")
 	}
@@ -124,19 +124,15 @@ func TestQPS(t *testing.T) {
 func TestAddResolvers(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
-	// Test that resolvers are not added when a zero QPS is provided
-	if err := r.AddResolvers(0, "8.8.8.8"); err == nil || r.Len() > 0 {
-		t.Errorf("the resolver was added with a QPS of value zero")
-	}
 	// Test that the resolver is added with a QPS greater than zero
-	if err := r.AddResolvers(10, "8.8.8.8"); err != nil || r.Len() == 0 {
+	if err := r.AddResolvers("8.8.8.8"); err != nil || r.Len() == 0 {
 		t.Errorf("the resolver was not added with a QPS greater than zero")
 	}
 }
 
 func TestStopped(t *testing.T) {
 	r := NewResolvers()
-	_ = r.AddResolvers(10, "8.8.8.8")
+	_ = r.AddResolvers("8.8.8.8")
 
 	// The resolver should not be considered stopped
 	select {
@@ -167,9 +163,9 @@ func TestQuery(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
-	r.SetDetectionResolver(10, "8.8.4.4")
+	r.SetDetectionResolver("8.8.4.4")
 
 	ch := make(chan *dns.Msg, 1)
 	r.Query(context.Background(), nil, ch)
@@ -203,7 +199,7 @@ func TestQueryChan(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	var success bool
@@ -233,7 +229,7 @@ func TestQueryBlocking(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	var success bool
@@ -281,7 +277,7 @@ func TestQueryTimeout(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
@@ -301,7 +297,7 @@ func TestEdgeCases(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
@@ -327,7 +323,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 	r.conns.Close()
 
@@ -349,7 +345,7 @@ func TestTruncatedMsgs(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
 	// Perform the query to call the TCP exchange
@@ -368,9 +364,9 @@ func TestTCPExchange(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
-	res := r.pool.GetResolver()
+	res := r.pool.GetResolver(name)
 
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)
@@ -403,9 +399,9 @@ func TestBadTCPExchange(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	r := NewResolvers()
-	_ = r.AddResolvers(10, addrstr)
+	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
-	res := r.pool.GetResolver()
+	res := r.pool.GetResolver(name)
 
 	ch := make(chan *dns.Msg, 2)
 	msg := QueryMsg(name, 1)

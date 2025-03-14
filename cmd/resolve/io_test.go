@@ -58,21 +58,6 @@ func TestCommaSep(t *testing.T) {
 	}
 }
 
-func TestResolverList(t *testing.T) {
-	set := stringset.New(resolvers...)
-	defer set.Close()
-
-	for _, p := range []string{"", "../../example/resolvers.txt"} {
-		list := stringset.New(ResolverFileList(p)...)
-		defer list.Close()
-
-		list.Intersect(set)
-		if list.Len() != set.Len() {
-			t.Errorf("Failed to obtain all of the DNS resolvers from %s", p)
-		}
-	}
-}
-
 func TestInputDomainNames(t *testing.T) {
 	results := make(chan string, 2)
 	names := []string{"www.caffix.net", "mail.caffix.net", "ftp.caffix.net"}

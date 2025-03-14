@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	minInterval         = 500 * time.Millisecond
 	numIntervalSeconds  = 5
-	rateUpdateInterval  = numIntervalSeconds * time.Second
 	minUpdateSampleSize = 10
+	minInterval         = 500 * time.Millisecond
+	rateUpdateInterval  = numIntervalSeconds * time.Second
 )
 
 type rateTrack struct {
@@ -47,7 +47,7 @@ func (r *rateTrack) Take() {
 }
 
 // ReportResponseTime provides the response time for a request for the domain name provided in the sub parameter.
-func (r *rateTrack) ReportResponseTime(sub string, delta time.Duration) {
+func (r *rateTrack) ReportResponseTime(delta time.Duration) {
 	var average, count float64
 
 	if delta > minInterval {
@@ -60,11 +60,12 @@ func (r *rateTrack) ReportResponseTime(sub string, delta time.Duration) {
 	average = float64(r.avg.Milliseconds())
 	average = ((average * (count - 1)) + float64(delta.Milliseconds())) / count
 	r.avg = time.Duration(math.Round(average)) * time.Millisecond
-
-	if r.first {
-		defer r.update()
-	}
+	first := r.first
 	r.Unlock()
+
+	if first {
+		r.update()
+	}
 }
 
 func (rt *rateTrack) update() {
@@ -76,10 +77,8 @@ func (rt *rateTrack) update() {
 	} else if rt.count < minUpdateSampleSize {
 		return
 	}
-
-	limit := rate.Every(rt.avg)
 	// update the QPS rate limiter and reset counters
-	rt.limiter = rate.NewLimiter(limit, 1)
+	rt.limiter.SetLimit(rate.Every(rt.avg))
 	rt.avg = 0
 	rt.count = 0
 }
