@@ -16,7 +16,7 @@ import (
 
 	"github.com/caffix/queue"
 	"github.com/miekg/dns"
-	"go.uber.org/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 // Resolvers is a pool of DNS resolvers managed for brute forcing using random selection.
@@ -32,8 +32,7 @@ type Resolvers struct {
 	resps     queue.Queue
 	qps       int
 	maxSet    bool
-	rate      ratelimit.Limiter
-	servRates *RateTracker
+	rate      *rate.Limiter
 	detector  *resolver
 	timeout   time.Duration
 	options   *ThresholdOptions
@@ -46,7 +45,7 @@ type resolver struct {
 	xchgs   *xchgMgr
 	address *net.UDPAddr
 	qps     int
-	rate    ratelimit.Limiter
+	rate    *rateTrack
 	stats   *stats
 }
 
@@ -65,7 +64,7 @@ func (r *Resolvers) initializeResolver(qps int, addr string) *resolver {
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
 			qps:     qps,
-			rate:    ratelimit.New(qps),
+			rate:    newRateTrack(),
 			stats:   new(stats),
 		}
 		go res.processRequests()
@@ -100,6 +99,7 @@ func NewResolvers() *Resolvers {
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		resps:     responses,
+		rate:      rate.NewLimiter(rate.Inf, 1),
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
@@ -108,6 +108,7 @@ func NewResolvers() *Resolvers {
 	go r.enforceMaxQPS()
 	go r.thresholdChecks()
 	go r.processResponses()
+	go r.updateRateLimiters()
 	return r
 }
 
@@ -119,10 +120,6 @@ func (r *Resolvers) Len() int {
 // SetLogger assigns a new logger to the resolver pool.
 func (r *Resolvers) SetLogger(l *log.Logger) {
 	r.log = l
-}
-
-func (r *Resolvers) SetRateTracker(rt *RateTracker) {
-	r.servRates = rt
 }
 
 // SetTimeout updates the amount of time this pool will wait for response messages.
@@ -160,14 +157,12 @@ func (r *Resolvers) QPS() int {
 
 // SetMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
 func (r *Resolvers) SetMaxQPS(qps int) {
-	r.qps = qps
 	if qps > 0 {
+		r.qps = qps
 		r.maxSet = true
-		r.rate = ratelimit.New(qps)
+		r.rate = rate.NewLimiter(rate.Limit(qps), 1)
 		return
 	}
-	r.maxSet = false
-	r.rate = nil
 }
 
 // AddResolvers initializes and adds new resolvers to the pool of resolvers.
@@ -199,7 +194,7 @@ func (r *Resolvers) AddResolvers(qps int, addrs ...string) error {
 	}
 	// create the new rate limiter for the updated QPS
 	if !r.maxSet {
-		r.rate = ratelimit.New(r.qps)
+		r.rate = rate.NewLimiter(rate.Limit(r.qps), 1)
 	}
 	return nil
 }
@@ -212,9 +207,6 @@ func (r *Resolvers) Stop() {
 	default:
 	}
 	close(r.done)
-	if r.servRates != nil {
-		r.servRates.Stop()
-	}
 	r.conns.Close()
 
 	all := r.pool.AllResolvers()
@@ -246,9 +238,6 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 
 		req.Msg = msg
 		req.Result = ch
-		if r.servRates != nil {
-			r.servRates.Take(msg.Question[0].Name)
-		}
 		r.queue.Append(req)
 		return
 	}
@@ -292,14 +281,12 @@ loop:
 				continue loop
 			}
 
-			if r.rate != nil {
-				_ = r.rate.Take()
-			}
-
+			_ = r.rate.Wait(context.TODO())
 			if req, ok := element.(*request); ok {
-				if res := r.pool.GetResolver(); res != nil {
-					req.Res = res
-					res.queue.Append(req)
+				name := req.Msg.Question[0].Name
+
+				if res := r.pool.GetResolver(name); res != nil {
+					go r.appendToResolverQueue(res, req)
 				} else {
 					req.errNoResponse()
 					req.release()
@@ -314,6 +301,12 @@ loop:
 			req.release()
 		}
 	})
+}
+
+func (r *Resolvers) appendToResolverQueue(res *resolver, req *request) {
+	req.Res = res
+	res.rate.Take()
+	res.queue.Append(req)
 }
 
 func (r *Resolvers) processResponses() {
@@ -356,11 +349,37 @@ func (r *Resolvers) processSingleResp(response *resp) {
 		} else {
 			req.Result <- req.Resp
 			req.Res.collectStats(req.Resp)
-			if r.servRates != nil {
-				delta := req.RecvAt.Sub(req.SentAt)
-				r.servRates.ReportResponseTime(name, delta)
-			}
+
+			delta := req.RecvAt.Sub(req.SentAt)
+			req.Res.rate.ReportResponseTime(name, delta)
 			req.release()
+		}
+	}
+}
+
+func (r *Resolvers) updateRateLimiters() {
+	t := time.NewTimer(rateUpdateInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-r.done:
+			return
+		case <-t.C:
+			r.updateAllRateLimiters()
+			t.Reset(rateUpdateInterval)
+		}
+	}
+}
+
+func (r *Resolvers) updateAllRateLimiters() {
+	all := r.pool.AllResolvers()
+
+	for _, res := range all {
+		select {
+		case <-res.done:
+		default:
+			res.rate.update()
 		}
 	}
 }
@@ -410,7 +429,7 @@ func (r *resolver) processRequests() {
 
 		r.queue.Process(func(element interface{}) {
 			if req, ok := element.(*request); ok && req != nil {
-				_ = r.rate.Take()
+				r.rate.Take()
 				go r.writeReq(req)
 			}
 		})
