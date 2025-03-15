@@ -126,24 +126,20 @@ func (r *randomSelector) Close() {
 	r.lookup = nil
 }
 
-func min(x, y int) int {
-	m := x
-	if y < m {
-		m = y
-	}
-	return m
-}
-
 type authNSSelector struct {
 	sync.Mutex
+	pool             *Resolvers
+	root             *resolver
 	list             []*resolver
 	lookup           map[string]*resolver
 	domainToServers  map[string][]string
 	serverToResolver map[string]*resolver
 }
 
-func newAuthNSSelector() *authNSSelector {
+func newAuthNSSelector(r *Resolvers) *authNSSelector {
 	return &authNSSelector{
+		pool:             r,
+		root:             r.initResolver("8.8.8.8:53"),
 		lookup:           make(map[string]*resolver),
 		domainToServers:  make(map[string][]string),
 		serverToResolver: make(map[string]*resolver),
@@ -273,39 +269,48 @@ func (r *authNSSelector) getMappedServers(sub, domain string) []string {
 		return false
 	})
 
-	if len(servers) == 0 {
-		if servs, zone := r.deepestNameServers(sub, domain); zone != "" && len(servs) > 0 {
-			r.domainToServers[zone] = servs
-			servers = servs
-		}
-	}
 	return servers
 }
 
-func (r *authNSSelector) deepestNameServers(sub, domain string) ([]string, string) {
-	var zone string
-	var servers []string
+func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *resolver {
+	ch := make(chan *dns.Msg, 1)
+	req := request{
+		Res:    res,
+		Msg:    QueryMsg(server, dns.TypeA),
+		Result: ch,
+	}
 
-	FQDNToRegistered(sub, domain, func(name string) bool {
-		var found bool
-		if s := r.getNameservers(name); len(s) > 0 {
-			zone = name
-			servers = s
-			found = true
+	for i := 0; i < 5; i++ {
+		req.Resp = nil
+		res.writeReq(&req)
+
+		select {
+		case <-req.Res.done:
+			return nil
+		case resp := <-ch:
+			if resp != nil && resp.Rcode == dns.RcodeSuccess {
+				if len(resp.Answer) > 0 {
+					if addr, ok := resp.Answer[0].(*dns.A); ok {
+						return r.pool.initResolver(addr.A.String() + ":53")
+					}
+				}
+				return nil
+			}
 		}
-		return found
-	})
-	return servers, zone
+
+		time.Sleep(time.Second)
+	}
+	return nil
 }
 
-func (r *authNSSelector) getNameservers(domain string) []string {
+func getTLDServers(tld string) []string {
 	client := dns.Client{
 		Net:     "tcp",
 		Timeout: time.Minute,
 	}
 
 	var servers []string
-	if m, _, err := client.Exchange(QueryMsg(domain, dns.TypeNS), "8.8.8.8:53"); err == nil && m != nil {
+	if m, _, err := client.Exchange(QueryMsg(tld, dns.TypeNS), "8.8.8.8:53"); err == nil && m != nil {
 		for _, rr := range AnswersByType(m, dns.TypeNS) {
 			if ns, ok := rr.(*dns.NS); ok {
 				servers = append(servers, strings.ToLower(RemoveLastDot(ns.Ns)))

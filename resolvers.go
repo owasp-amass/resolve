@@ -30,7 +30,6 @@ type Resolvers struct {
 	queue     queue.Queue
 	resps     queue.Queue
 	qps       int
-	maxSet    bool
 	rate      *rate.Limiter
 	detector  *resolver
 	timeout   time.Duration
@@ -43,12 +42,11 @@ type resolver struct {
 	queue   queue.Queue
 	xchgs   *xchgMgr
 	address *net.UDPAddr
-	qps     int
 	rate    *rateTrack
 	stats   *stats
 }
 
-func (r *Resolvers) initializeResolver(addr string) *resolver {
+func (r *Resolvers) initResolver(addr string) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
@@ -62,7 +60,6 @@ func (r *Resolvers) initializeResolver(addr string) *resolver {
 			queue:   queue.NewQueue(),
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
-			qps:     20,
 			rate:    newRateTrack(),
 			stats:   new(stats),
 		}
@@ -84,13 +81,6 @@ func (r *resolver) stop() {
 		req.errNoResponse()
 		req.release()
 	}
-
-	if !r.pool.maxSet {
-		r.pool.Lock()
-		defer r.pool.Unlock()
-		r.pool.qps -= r.qps
-		r.pool.rate.SetLimit(rate.Limit(r.pool.qps))
-	}
 }
 
 // NewResolvers initializes a Resolvers.
@@ -100,7 +90,6 @@ func NewResolvers() *Resolvers {
 		done:      make(chan struct{}, 1),
 		log:       log.New(io.Discard, "", 0),
 		conns:     newConnections(runtime.NumCPU(), responses),
-		pool:      newAuthNSSelector(),
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
 		resps:     responses,
@@ -108,6 +97,7 @@ func NewResolvers() *Resolvers {
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
+	r.pool = newAuthNSSelector(r)
 
 	go r.timeouts()
 	go r.enforceMaxQPS()
@@ -152,19 +142,10 @@ func (r *Resolvers) updateResolverTimeouts() {
 	}
 }
 
-// QPS returns the maximum queries per second provided by the resolver pool.
-func (r *Resolvers) QPS() int {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.qps
-}
-
 // SetMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
 func (r *Resolvers) SetMaxQPS(qps int) {
 	if qps > 0 {
 		r.qps = qps
-		r.maxSet = true
 		r.rate.SetLimit(rate.Limit(qps))
 	}
 }
@@ -186,16 +167,9 @@ func (r *Resolvers) AddResolvers(addrs ...string) error {
 		if res := r.pool.LookupResolver(addr); res != nil {
 			continue
 		}
-		if res := r.initializeResolver(addr); res != nil {
+		if res := r.initResolver(addr); res != nil {
 			r.pool.AddResolver(res)
-			if !r.maxSet {
-				r.qps += 20
-			}
 		}
-	}
-	// update the new rate limiter for the new QPS
-	if !r.maxSet {
-		r.rate.SetLimit(rate.Limit(r.qps))
 	}
 	r.Unlock()
 	return nil

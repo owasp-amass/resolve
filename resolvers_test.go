@@ -96,31 +96,6 @@ func TestAddLogger(t *testing.T) {
 	}
 }
 
-func TestQPS(t *testing.T) {
-	r := NewResolvers()
-	defer r.Stop()
-	// Test that the value returned by QPS equals the value of the qps field
-	if r.QPS() != r.qps {
-		t.Errorf("the value returned by QPS did not equal the qps field")
-	}
-
-	qps := 100
-	// Test that the value returned by QPS equals the qps provided
-	r.SetMaxQPS(qps)
-	if r.QPS() != qps {
-		t.Errorf("the value returned by QPS did not equal the qps provided to AddMaxQPS")
-	}
-	// A rate limiter should now be setup, since a QPS greater than zero has been provided
-	if !r.maxSet || r.rate == nil {
-		t.Errorf("the rate limiter was not setup after providing a qps greater than zero")
-	}
-	// The rate limiter should be removed once we zero out the qps
-	r.SetMaxQPS(0)
-	if r.maxSet || r.rate != nil {
-		t.Errorf("the rate limiter was not removed after providing a qps of zero")
-	}
-}
-
 func TestAddResolvers(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()

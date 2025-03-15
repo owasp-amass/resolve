@@ -6,44 +6,36 @@ package resolve
 
 import (
 	"testing"
+
+	"github.com/caffix/stringset"
 )
 
-func TestMin(t *testing.T) {
-	cases := []struct {
-		x    int
-		y    int
-		want int
-	}{
-		{
-			x:    4,
-			y:    5,
-			want: 4,
-		},
-		{
-			x:    4,
-			y:    4,
-			want: 4,
-		},
-		{
-			x:    0,
-			y:    4,
-			want: 0,
-		},
-		{
-			x:    1,
-			y:    0,
-			want: 0,
-		},
-		{
-			x:    10,
-			y:    4,
-			want: 4,
-		},
-	}
+func TestGetTLDServers(t *testing.T) {
+	wanted := stringset.New(
+		"a.edu-servers.net",
+		"b.edu-servers.net",
+		"c.edu-servers.net",
+		"d.edu-servers.net",
+		"e.edu-servers.net",
+		"f.edu-servers.net",
+		"g.edu-servers.net",
+		"h.edu-servers.net",
+		"i.edu-servers.net",
+		"j.edu-servers.net",
+		"k.edu-servers.net",
+		"l.edu-servers.net",
+		"m.edu-servers.net",
+	)
 
-	for _, c := range cases {
-		if m := min(c.x, c.y); m != c.want {
-			t.Errorf("min returned %d instead of the expected %d", m, c.want)
-		}
+	servers := getTLDServers("edu")
+	if servers == nil {
+		t.Errorf("Failed to obtain the .edu servers")
+		return
+	}
+	got := stringset.New(servers...)
+
+	wanted.Subtract(got)
+	if wanted.Len() > 0 {
+		t.Errorf("Failed to obtain the .edu servers")
 	}
 }
