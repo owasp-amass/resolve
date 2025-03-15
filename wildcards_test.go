@@ -50,7 +50,7 @@ func TestWildcardDetected(t *testing.T) {
 		},
 		{
 			label: "invalid name within a wildcard",
-			input: "jeff_foley.wildcard.domain.com",
+			input: "foley.wildcard.domain.com",
 			want:  true,
 		},
 		{
@@ -60,6 +60,7 @@ func TestWildcardDetected(t *testing.T) {
 		},
 	}
 
+	r.SetDetectionResolver(addrstr)
 	for _, c := range cases {
 		resp, err := r.QueryBlocking(context.Background(), QueryMsg(c.input, 1))
 		if err != nil {

@@ -11,6 +11,30 @@ import (
 	"github.com/caffix/stringset"
 )
 
+func TestAuthGetResolver(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
+
+	auth := r.pool.(*authNSSelector)
+	r.SetTimeout(500 * time.Millisecond)
+	res := auth.GetResolver("www.utica.edu")
+	if res == nil {
+		t.Errorf("Failed to obtain the resolver for www.utica.edu")
+	}
+}
+
+func TestPopulateAuthServers(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
+
+	auth := r.pool.(*authNSSelector)
+	r.SetTimeout(500 * time.Millisecond)
+	auth.populateAuthServers("utica.edu")
+	if res, found := auth.fqdnToResolvers["utica.edu"]; !found || len(res) != 2 {
+		t.Errorf("Failed to obtain the name servers")
+	}
+}
+
 func TestServerNameToResolverObj(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()

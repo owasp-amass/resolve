@@ -39,14 +39,10 @@ func newRateTrack() *rateTrack {
 
 // Take blocks as required by the implemented rate limiter.
 func (r *rateTrack) Take() {
-	r.Lock()
-	l := r.limiter
-	r.Unlock()
-
-	_ = l.Wait(context.TODO())
+	_ = r.limiter.Wait(context.TODO())
 }
 
-// ReportResponseTime provides the response time for a request for the domain name provided in the sub parameter.
+// ReportResponseTime provides the response time for a request.
 func (r *rateTrack) ReportResponseTime(delta time.Duration) {
 	var average, count float64
 

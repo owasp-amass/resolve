@@ -38,25 +38,16 @@ type connections struct {
 }
 
 func newConnections(cpus int, resps queue.Queue) *connections {
-	if cpus < 100 {
-		cpus = 100
-	}
-
 	conns := &connections{
 		resps: resps,
 		done:  make(chan struct{}),
 		cpus:  cpus,
 	}
 
-	conns.Lock()
-	defer conns.Unlock()
-
 	for i := 0; i < cpus; i++ {
-		if err := conns.Add(); err != nil {
-			conns.Close()
-			return nil
-		}
+		_ = conns.Add()
 	}
+
 	go conns.rotations()
 	return conns
 }
@@ -75,7 +66,7 @@ func (r *connections) Close() {
 }
 
 func (r *connections) rotations() {
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 
 	for {
@@ -93,13 +84,7 @@ func (r *connections) rotate() {
 	defer r.Unlock()
 
 	for _, c := range r.conns {
-		go func(c *connection) {
-			t := time.NewTimer(10 * time.Second)
-			defer t.Stop()
-
-			<-t.C
-			close(c.done)
-		}(c)
+		close(c.done)
 	}
 
 	r.conns = []*connection{}

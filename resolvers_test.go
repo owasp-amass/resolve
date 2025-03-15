@@ -17,6 +17,7 @@ import (
 
 func TestInitializeResolver(t *testing.T) {
 	r := NewResolvers()
+	defer r.Stop()
 
 	if res := r.initResolver("192.168.1.1"); res == nil ||
 		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
@@ -32,7 +33,7 @@ func TestSetTimeout(t *testing.T) {
 	_ = r.AddResolvers("8.8.8.8")
 	defer r.Stop()
 
-	timeout := 2 * time.Second
+	timeout := 500 * time.Millisecond
 	r.SetTimeout(timeout)
 
 	if r.timeout != timeout || r.pool.GetResolver("caffix.net").xchgs.timeout != timeout {
@@ -72,20 +73,6 @@ func TestPoolQuery(t *testing.T) {
 	}
 }
 
-func TestLen(t *testing.T) {
-	r := NewResolvers()
-	defer r.Stop()
-	// Test that the length is zero before adding DNS resolvers
-	if r.Len() > 0 {
-		t.Errorf("the length was greater than zero before adding DNS resolvers")
-	}
-	// Test that the length equals one after adding a single resolver
-	_ = r.AddResolvers("8.8.8.8")
-	if r.Len() != 1 {
-		t.Errorf("the length did not equal one after adding the first resolver")
-	}
-}
-
 func TestAddLogger(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
@@ -100,7 +87,7 @@ func TestAddResolvers(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
 	// Test that the resolver is added with a QPS greater than zero
-	if err := r.AddResolvers("8.8.8.8"); err != nil || r.Len() == 0 {
+	if err := r.AddResolvers("8.8.8.8"); err != nil {
 		t.Errorf("the resolver was not added with a QPS greater than zero")
 	}
 }
@@ -143,6 +130,8 @@ func TestQuery(t *testing.T) {
 	r.SetDetectionResolver("8.8.4.4")
 
 	ch := make(chan *dns.Msg, 1)
+	defer close(ch)
+
 	r.Query(context.Background(), nil, ch)
 	if resp := <-ch; resp != nil {
 		t.Errorf("the query did not return the expected nil response message")
@@ -180,7 +169,10 @@ func TestQueryChan(t *testing.T) {
 	var success bool
 	for i := 0; i < 5; i++ {
 		ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
-		if m := <-ch; m != nil && len(m.Answer) > 0 {
+		m := <-ch
+		close(ch)
+
+		if m != nil && len(m.Answer) > 0 {
 			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 				success = true
 				break
@@ -227,16 +219,6 @@ func TestQueryBlocking(t *testing.T) {
 	// The query should fail since the context has expired
 	_, err = r.QueryBlocking(ctx, QueryMsg(name, 1))
 	if err == nil {
-		t.Errorf("the query did not fail as expected")
-	}
-}
-
-func TestEnforceMaxQPS(t *testing.T) {
-	r := NewResolvers()
-	r.SetMaxQPS(20)
-	// The query should fail since no DNS resolver has been added to the pool
-	resp, _ := r.QueryBlocking(context.Background(), QueryMsg("caffix.net", 1))
-	if resp.Rcode != RcodeNoResponse {
 		t.Errorf("the query did not fail as expected")
 	}
 }

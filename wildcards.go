@@ -110,6 +110,7 @@ func (r *Resolvers) SetDetectionResolver(addr string) {
 		}
 		if res := r.initResolver(addr); res != nil {
 			r.detector = res
+			r.pool.AddResolver(res)
 		}
 	}
 }
@@ -201,7 +202,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.R
 		var data string
 
 		if a.Header().Rrtype == dns.TypeCNAME {
-			data = strings.Trim((a.(*dns.CNAME)).Target, ".")
+			data = RemoveLastDot((a.(*dns.CNAME)).Target)
 		} else if a.Header().Rrtype == dns.TypeA {
 			data = (a.(*dns.A)).A.String()
 		} else if a.Header().Rrtype == dns.TypeAAAA {
@@ -234,8 +235,8 @@ loop:
 			Msg:    QueryMsg(name, qtype),
 			Result: ch,
 		}
+		detector.queue.Append(req)
 
-		detector.writeReq(req)
 		select {
 		case <-ctx.Done():
 			break loop
@@ -261,28 +262,25 @@ func intersectRecordData(set *stringset.Set, ans []dns.RR) {
 
 	for _, a := range ans {
 		if a.Header().Rrtype == dns.TypeCNAME {
-			records.Insert(strings.Trim((a.(*dns.CNAME)).Target, "."))
+			records.Insert(RemoveLastDot((a.(*dns.CNAME)).Target))
 		} else if a.Header().Rrtype == dns.TypeA {
 			records.Insert((a.(*dns.A)).A.String())
 		} else if a.Header().Rrtype == dns.TypeAAAA {
 			records.Insert((a.(*dns.AAAA)).AAAA.String())
 		}
 	}
+
 	set.Intersect(records)
 }
 
 func insertRecordData(set *stringset.Set, ans []dns.RR) {
-	records := stringset.New()
-	defer records.Close()
-
 	for _, a := range ans {
 		if a.Header().Rrtype == dns.TypeCNAME {
-			records.Insert(strings.Trim((a.(*dns.CNAME)).Target, "."))
+			set.Insert(RemoveLastDot((a.(*dns.CNAME)).Target))
 		} else if a.Header().Rrtype == dns.TypeA {
-			records.Insert((a.(*dns.A)).A.String())
+			set.Insert((a.(*dns.A)).A.String())
 		} else if a.Header().Rrtype == dns.TypeAAAA {
-			records.Insert((a.(*dns.AAAA)).AAAA.String())
+			set.Insert((a.(*dns.AAAA)).AAAA.String())
 		}
 	}
-	set.Union(records)
 }

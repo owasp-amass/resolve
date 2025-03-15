@@ -81,9 +81,10 @@ func (r *randomSelector) AddResolver(res *resolver) {
 	r.Lock()
 	defer r.Unlock()
 
-	if _, found := r.lookup[res.address.IP.String()]; !found {
+	addrstr := res.address.IP.String()
+	if _, found := r.lookup[addrstr]; !found {
 		r.list = append(r.list, res)
-		r.lookup[res.address.IP.String()] = res
+		r.lookup[addrstr] = res
 	}
 }
 
@@ -135,11 +136,12 @@ func (r *randomSelector) Close() {
 
 type authNSSelector struct {
 	sync.Mutex
+	update           sync.Mutex
 	pool             *Resolvers
 	root             *resolver
 	list             []*resolver
 	lookup           map[string]*resolver
-	domainToServers  map[string][]string
+	fqdnToServers    map[string][]string
 	fqdnToResolvers  map[string][]*resolver
 	serverToResolver map[string]*resolver
 }
@@ -154,7 +156,7 @@ func newAuthNSSelector(r *Resolvers) *authNSSelector {
 		root:             google,
 		list:             []*resolver{google},
 		lookup:           map[string]*resolver{host: google},
-		domainToServers:  make(map[string][]string),
+		fqdnToServers:    make(map[string][]string),
 		fqdnToResolvers:  make(map[string][]*resolver),
 		serverToResolver: make(map[string]*resolver),
 	}
@@ -162,41 +164,44 @@ func newAuthNSSelector(r *Resolvers) *authNSSelector {
 
 // GetResolver performs random selection on the pool of resolvers.
 func (r *authNSSelector) GetResolver(fqdn string) *resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	n := strings.ToLower(RemoveLastDot(fqdn))
-	name := n
-	labels := strings.Split(n, ".")
+	name := strings.ToLower(RemoveLastDot(fqdn))
+	labels := strings.Split(name, ".")
 	if len(labels) > 1 {
 		name = strings.Join(labels[1:], ".")
 	}
 
-	if _, found := r.domainToServers[name]; !found {
+	servers := r.getFQDNToServers(name)
+	if len(servers) == 0 {
+		r.update.Lock()
 		r.populateAuthServers(name)
+		r.update.Unlock()
 	}
 
-	if res, found := r.fqdnToResolvers[name]; found {
-		return pickOneResolver(res)
+	resolvers := r.getFQDNToResolvers(name)
+	if len(resolvers) > 0 {
+		return pickOneResolver(resolvers)
 	}
 	return nil
 }
 
 func (r *authNSSelector) LookupResolver(addr string) *resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.lookup[addr]
+	return r.getLookup(addr)
 }
 
-func (r *authNSSelector) AddResolver(res *resolver) {}
+func (r *authNSSelector) AddResolver(res *resolver) {
+	addrstr := res.address.IP.String()
+
+	if fres := r.getLookup(addrstr); fres == nil {
+		r.appendToList([]*resolver{res})
+		r.setLookup(addrstr, res)
+	}
+}
 
 func (r *authNSSelector) AllResolvers() []*resolver {
-	r.Lock()
-	defer r.Unlock()
+	list := r.getList()
 
 	var active []*resolver
-	for _, res := range r.list {
+	for _, res := range list {
 		select {
 		case <-res.done:
 		default:
@@ -207,11 +212,10 @@ func (r *authNSSelector) AllResolvers() []*resolver {
 }
 
 func (r *authNSSelector) Len() int {
-	r.Lock()
-	defer r.Unlock()
+	list := r.getList()
 
 	var count int
-	for _, res := range r.list {
+	for _, res := range list {
 		select {
 		case <-res.done:
 		default:
@@ -222,10 +226,9 @@ func (r *authNSSelector) Len() int {
 }
 
 func (r *authNSSelector) Close() {
-	r.Lock()
-	defer r.Unlock()
+	list := r.getList()
 
-	for _, res := range r.list {
+	for _, res := range list {
 		select {
 		case <-res.done:
 		default:
@@ -235,19 +238,23 @@ func (r *authNSSelector) Close() {
 
 	r.list = nil
 	r.lookup = nil
-	r.domainToServers = nil
+	r.fqdnToServers = nil
 	r.fqdnToResolvers = nil
 	r.serverToResolver = nil
 }
 
 func (r *authNSSelector) populateAuthServers(fqdn string) {
+	if s := r.getFQDNToServers(fqdn); len(s) > 0 {
+		return
+	}
+
 	labels := strings.Split(fqdn, ".")
 	tld := labels[len(labels)-1]
 
 	var last string
-	var resolvers []*resolver
+	resolvers := []*resolver{r.root}
 	FQDNToRegistered(fqdn, tld, func(name string) bool {
-		if res, found := r.fqdnToResolvers[name]; found {
+		if res := r.getFQDNToResolvers(name); len(res) > 0 {
 			resolvers = res
 			return true
 		}
@@ -263,19 +270,17 @@ func (r *authNSSelector) populateAuthServers(fqdn string) {
 		res := pickOneResolver(resolvers)
 
 		if servers := r.getNameServers(name, res); len(servers) > 0 {
-			r.domainToServers[name] = servers
+			r.setFQDNToServers(name, servers)
 
 			var resset []*resolver
 			for _, server := range servers {
-				if res, found := r.serverToResolver[server]; found {
-					resset = append(resset, res)
-				} else {
-					if res := r.serverNameToResolverObj(server, res); res != nil {
-						resset = append(resset, res)
-						r.serverToResolver[server] = res
-						r.list = append(r.list, res)
-						r.lookup[res.address.IP.String()] = res
-					}
+				if fres := r.getServerToResolver(server); fres != nil {
+					resset = append(resset, fres)
+				} else if nres := r.serverNameToResolverObj(server, res); nres != nil {
+					resset = append(resset, nres)
+					r.appendToList([]*resolver{nres})
+					r.setLookup(nres.address.IP.String(), nres)
+					r.setServerToResolver(server, nres)
 				}
 			}
 
@@ -284,7 +289,7 @@ func (r *authNSSelector) populateAuthServers(fqdn string) {
 			}
 		}
 
-		r.fqdnToResolvers[name] = resolvers
+		r.setFQDNToResolvers(name, resolvers)
 		return false
 	})
 }
@@ -293,7 +298,7 @@ func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < maxQueryAttempts; i++ {
 		req := request{
 			Res:    res,
 			Msg:    QueryMsg(server, dns.TypeA),
@@ -326,7 +331,7 @@ func (r *authNSSelector) getNameServers(fqdn string, res *resolver) []string {
 
 	var servers []string
 loop:
-	for i := 0; i < 5; i++ {
+	for i := 0; i < maxQueryAttempts; i++ {
 		req := request{
 			Res:    res,
 			Msg:    QueryMsg(fqdn, dns.TypeNS),
@@ -348,8 +353,77 @@ loop:
 			}
 		}
 	}
-
 	return servers
+}
+
+func (r *authNSSelector) getList() []*resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.list
+}
+
+func (r *authNSSelector) appendToList(elements []*resolver) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.list = append(r.list, elements...)
+}
+
+func (r *authNSSelector) getLookup(key string) *resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.lookup[key]
+}
+
+func (r *authNSSelector) setLookup(key string, res *resolver) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.lookup[key] = res
+}
+
+func (r *authNSSelector) getFQDNToServers(key string) []string {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.fqdnToServers[key]
+}
+
+func (r *authNSSelector) setFQDNToServers(key string, servers []string) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.fqdnToServers[key] = servers
+}
+
+func (r *authNSSelector) getFQDNToResolvers(key string) []*resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.fqdnToResolvers[key]
+}
+
+func (r *authNSSelector) setFQDNToResolvers(key string, resolvers []*resolver) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.fqdnToResolvers[key] = resolvers
+}
+
+func (r *authNSSelector) getServerToResolver(key string) *resolver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.serverToResolver[key]
+}
+
+func (r *authNSSelector) setServerToResolver(key string, res *resolver) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.serverToResolver[key] = res
 }
 
 func pickOneResolver(resolvers []*resolver) *resolver {

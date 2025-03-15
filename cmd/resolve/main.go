@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	defaultQPS     int  = 500
 	defaultRetries int  = 50
 	defaultTimeout int  = 500
 	defaultQuiet   bool = false
@@ -80,7 +79,7 @@ func ObtainParams(args []string) (*params, *bytes.Buffer, error) {
 	p := new(params)
 	flags.BoolVar(&p.Quiet, "q", defaultQuiet, "Quiet mode")
 	flags.BoolVar(&p.Help, "h", defaultHelp, "Print usage information")
-	flags.IntVar(&p.QPS, "qps", defaultQPS, "Number of queries sent to each resolver per second")
+	flags.IntVar(&p.QPS, "qps", 0, "Number of queries sent to each resolver per second")
 	flags.IntVar(&p.Retries, "c", defaultRetries, "Times each DNS name is attempted before giving up")
 	flags.IntVar(&timeout, "timeout", defaultTimeout, "Milliseconds to wait before a request times out")
 	flags.Var(&queryTypes, "t", `DNS record types comma-separated (default "A")`)
@@ -104,7 +103,7 @@ func ObtainParams(args []string) (*params, *bytes.Buffer, error) {
 	if len(p.Qtypes) == 0 {
 		p.Qtypes = []uint16{dns.TypeA}
 	}
-	if err := p.SetupResolverPool(rlist, rpath, timeout, detector); err != nil {
+	if err := p.SetupResolverPool(rlist, rpath, p.QPS, timeout, detector); err != nil {
 		return nil, nil, fmt.Errorf("failed to setup the resolver pool: %v", err)
 	}
 	return p, nil, nil
@@ -144,16 +143,21 @@ func (p *params) SetupFiles(lpath, opath, ipath string) error {
 	return nil
 }
 
-func (p *params) SetupResolverPool(list []string, rpath string, timeout int, detector string) error {
+func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int, detector string) error {
 	p.Pool = resolve.NewResolvers()
 
 	// Load DNS resolvers into the pool
-	if l := len(list); l == 0 || rpath != "" {
+	if rpath != "" {
 		list = append(list, ResolverFileList(rpath)...)
 	}
-	if err := p.Pool.AddResolvers(list...); err != nil {
-		p.Pool.Stop()
-		return fmt.Errorf("failed to add the resolvers at a QPS of %d: %v", p.QPS, err)
+	if len(list) > 0 {
+		if err := p.Pool.AddResolvers(list...); err != nil {
+			p.Pool.Stop()
+			return fmt.Errorf("failed to add the resolvers at a QPS of %d: %v", p.QPS, err)
+		}
+	}
+	if qps > 0 {
+		p.Pool.SetMaxQPS(qps)
 	}
 	// Set the DNS query timeout value using the provided interval
 	if timeout > 0 {
@@ -168,7 +172,6 @@ func (p *params) SetupResolverPool(list []string, rpath string, timeout int, det
 		p.Pool.SetDetectionResolver(detector)
 		p.Detection = true
 	}
-
 	return nil
 }
 

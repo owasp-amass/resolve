@@ -112,11 +112,6 @@ func NewResolvers() *Resolvers {
 	return r
 }
 
-// Len returns the number of resolvers that have been added to the pool.
-func (r *Resolvers) Len() int {
-	return r.pool.Len()
-}
-
 // SetLogger assigns a new logger to the resolver pool.
 func (r *Resolvers) SetLogger(l *log.Logger) {
 	r.log = l
@@ -157,12 +152,14 @@ func (r *Resolvers) SetMaxQPS(qps int) {
 
 // AddResolvers initializes and adds new resolvers to the pool of resolvers.
 func (r *Resolvers) AddResolvers(addrs ...string) error {
+	r.Lock()
+	defer r.Unlock()
+
 	if sel, ok := r.pool.(*authNSSelector); ok {
 		sel.Close()
 		r.pool = newRandomSelector()
 	}
 
-	r.Lock()
 	for _, addr := range addrs {
 		if _, _, err := net.SplitHostPort(addr); err != nil {
 			// add the default port number to the IP address
@@ -176,12 +173,14 @@ func (r *Resolvers) AddResolvers(addrs ...string) error {
 			r.pool.AddResolver(res)
 		}
 	}
-	r.Unlock()
 	return nil
 }
 
 // Stop will release resources for the resolver pool and all add resolvers.
 func (r *Resolvers) Stop() {
+	r.Lock()
+	defer r.Unlock()
+
 	select {
 	case <-r.done:
 		return
@@ -231,7 +230,10 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 	}
 
 	var err error
-	resp := <-r.QueryChan(ctx, msg)
+	ch := r.QueryChan(ctx, msg)
+	defer close(ch)
+
+	resp := <-ch
 	if resp == nil {
 		err = errors.New("query failed")
 	}

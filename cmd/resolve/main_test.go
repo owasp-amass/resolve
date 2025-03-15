@@ -32,7 +32,6 @@ func TestObtainParams(t *testing.T) {
 			expected: &params{
 				Qtypes:    []uint16{dns.TypeA},
 				Quiet:     defaultQuiet,
-				QPS:       defaultQPS,
 				Retries:   defaultRetries,
 				Detection: false,
 				Help:      defaultHelp,
@@ -48,7 +47,6 @@ func TestObtainParams(t *testing.T) {
 			ok:    true,
 			expected: &params{
 				Quiet:     defaultQuiet,
-				QPS:       defaultQPS,
 				Retries:   defaultRetries,
 				Detection: false,
 				Help:      true,
@@ -56,11 +54,6 @@ func TestObtainParams(t *testing.T) {
 		}, {
 			label:    "Cannot open input file",
 			args:     []string{"-i", "../../example/input.txt"},
-			ok:       false,
-			expected: &params{},
-		}, {
-			label:    "Invalid QPS value",
-			args:     []string{"-qps", "0"},
 			ok:       false,
 			expected: &params{},
 		}, {
@@ -211,6 +204,7 @@ func TestSetupResolverPool(t *testing.T) {
 	}{
 		{
 			label: "Zero QPS",
+			ok:    true,
 		}, {
 			label:   "Non-zero timeout",
 			qps:     1,
@@ -227,7 +221,7 @@ func TestSetupResolverPool(t *testing.T) {
 		f := func(t *testing.T) {
 			p := &params{QPS: c.qps}
 
-			if err := p.SetupResolverPool(nil, "", c.timeout, c.detector); err == nil != c.ok {
+			if err := p.SetupResolverPool(nil, "", c.qps, c.timeout, c.detector); err == nil != c.ok {
 				t.Errorf("Got: %t; Expected: %t", err == nil, c.ok)
 			}
 		}
@@ -254,7 +248,7 @@ func TestEventLoop(t *testing.T) {
 		Retries: 5,
 	}
 
-	if err := p.SetupResolverPool([]string{addrstr}, "", 100, addrstr); err != nil {
+	if err := p.SetupResolverPool([]string{addrstr}, "", 10, 100, addrstr); err != nil {
 		t.Fatalf("Failed to setup the resolver pool: %v", err)
 	}
 	defer p.Pool.Stop()
