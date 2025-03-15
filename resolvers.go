@@ -97,7 +97,12 @@ func NewResolvers() *Resolvers {
 		timeout:   DefaultTimeout,
 		options:   new(ThresholdOptions),
 	}
+
 	r.pool = newAuthNSSelector(r)
+	if r.pool == nil {
+		r.conns.Close()
+		return nil
+	}
 
 	go r.timeouts()
 	go r.enforceMaxQPS()
@@ -184,15 +189,6 @@ func (r *Resolvers) Stop() {
 	}
 	close(r.done)
 	r.conns.Close()
-
-	all := r.pool.AllResolvers()
-	if d := r.getDetectionResolver(); d != nil {
-		all = append(all, d)
-	}
-
-	for _, res := range all {
-		res.stop()
-	}
 	r.pool.Close()
 }
 

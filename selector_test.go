@@ -6,11 +6,27 @@ package resolve
 
 import (
 	"testing"
+	"time"
 
 	"github.com/caffix/stringset"
 )
 
-func TestGetTLDServers(t *testing.T) {
+func TestServerNameToResolverObj(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
+
+	auth := r.pool.(*authNSSelector)
+	r.SetTimeout(500 * time.Millisecond)
+	res := auth.serverNameToResolverObj("a.edu-servers.net", auth.root)
+	if res == nil {
+		t.Errorf("Failed to obtain the resolver object for a.edu-servers.net")
+	}
+}
+
+func TestGetNameServers(t *testing.T) {
+	r := NewResolvers()
+	defer r.Stop()
+
 	wanted := stringset.New(
 		"a.edu-servers.net",
 		"b.edu-servers.net",
@@ -27,8 +43,10 @@ func TestGetTLDServers(t *testing.T) {
 		"m.edu-servers.net",
 	)
 
-	servers := getTLDServers("edu")
-	if servers == nil {
+	auth := r.pool.(*authNSSelector)
+	r.SetTimeout(500 * time.Millisecond)
+	servers := auth.getNameServers("edu", auth.root)
+	if len(servers) == 0 {
 		t.Errorf("Failed to obtain the .edu servers")
 		return
 	}
@@ -36,6 +54,6 @@ func TestGetTLDServers(t *testing.T) {
 
 	wanted.Subtract(got)
 	if wanted.Len() > 0 {
-		t.Errorf("Failed to obtain the .edu servers")
+		t.Errorf("Failed to obtain the correct .edu servers")
 	}
 }

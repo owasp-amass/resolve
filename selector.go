@@ -6,12 +6,11 @@ package resolve
 
 import (
 	"math/rand"
+	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/miekg/dns"
-	"golang.org/x/net/publicsuffix"
 )
 
 type selector interface {
@@ -122,6 +121,14 @@ func (r *randomSelector) Close() {
 	r.Lock()
 	defer r.Unlock()
 
+	for _, res := range r.list {
+		select {
+		case <-res.done:
+		default:
+			res.stop()
+		}
+	}
+
 	r.list = nil
 	r.lookup = nil
 }
@@ -133,15 +140,22 @@ type authNSSelector struct {
 	list             []*resolver
 	lookup           map[string]*resolver
 	domainToServers  map[string][]string
+	fqdnToResolvers  map[string][]*resolver
 	serverToResolver map[string]*resolver
 }
 
 func newAuthNSSelector(r *Resolvers) *authNSSelector {
+	addr := "8.8.8.8:53"
+	google := r.initResolver(addr)
+	host, _, _ := net.SplitHostPort(addr)
+
 	return &authNSSelector{
 		pool:             r,
-		root:             r.initResolver("8.8.8.8:53"),
-		lookup:           make(map[string]*resolver),
+		root:             google,
+		list:             []*resolver{google},
+		lookup:           map[string]*resolver{host: google},
 		domainToServers:  make(map[string][]string),
+		fqdnToResolvers:  make(map[string][]*resolver),
 		serverToResolver: make(map[string]*resolver),
 	}
 }
@@ -151,26 +165,21 @@ func (r *authNSSelector) GetResolver(fqdn string) *resolver {
 	r.Lock()
 	defer r.Unlock()
 
-	if l := len(r.list); l == 0 {
-		return nil
-	} else if l == 1 {
-		return r.list[0]
+	n := strings.ToLower(RemoveLastDot(fqdn))
+	name := n
+	labels := strings.Split(n, ".")
+	if len(labels) > 1 {
+		name = strings.Join(labels[1:], ".")
 	}
 
-	var chosen *resolver
-	sel := rand.Intn(len(r.list))
-loop:
-	for _, res := range r.list[sel:] {
-		select {
-		case <-res.done:
-			continue loop
-		default:
-		}
-
-		chosen = res
-		break
+	if _, found := r.domainToServers[name]; !found {
+		r.populateAuthServers(name)
 	}
-	return chosen
+
+	if res, found := r.fqdnToResolvers[name]; found {
+		return pickOneResolver(res)
+	}
+	return nil
 }
 
 func (r *authNSSelector) LookupResolver(addr string) *resolver {
@@ -227,96 +236,119 @@ func (r *authNSSelector) Close() {
 	r.list = nil
 	r.lookup = nil
 	r.domainToServers = nil
+	r.fqdnToResolvers = nil
 	r.serverToResolver = nil
 }
 
-func (r *authNSSelector) getDomainResolver(sub string) *resolver {
-	n := strings.ToLower(RemoveLastDot(sub))
+func (r *authNSSelector) populateAuthServers(fqdn string) {
+	labels := strings.Split(fqdn, ".")
+	tld := labels[len(labels)-1]
 
-	domain, err := publicsuffix.EffectiveTLDPlusOne(n)
-	if err != nil {
-		return nil
-	}
-	domain = strings.ToLower(RemoveLastDot(domain))
-
-	servers := r.getMappedServers(n, domain)
-	if len(servers) == 0 {
-		return nil
-	}
-
+	var last string
 	var resolvers []*resolver
-	// check if we already have these servers
-	for _, name := range servers {
-		if res, found := r.serverToResolver[name]; found {
-			resolvers = append(resolvers, res)
-		}
-	}
-	if len(resolvers) == 0 {
-		return nil
-	}
-
-	return pickOneResolver(resolvers)
-}
-
-func (r *authNSSelector) getMappedServers(sub, domain string) []string {
-	var servers []string
-
-	FQDNToRegistered(sub, domain, func(name string) bool {
-		if serv, found := r.domainToServers[name]; found {
-			servers = serv
+	FQDNToRegistered(fqdn, tld, func(name string) bool {
+		if res, found := r.fqdnToResolvers[name]; found {
+			resolvers = res
 			return true
 		}
+		last = name
 		return false
 	})
 
-	return servers
+	if ll := len(labels); ll-1 < len(strings.Split(last, ".")) {
+		return
+	}
+
+	RegisteredToFQDN(last, fqdn, func(name string) bool {
+		res := pickOneResolver(resolvers)
+
+		if servers := r.getNameServers(name, res); len(servers) > 0 {
+			r.domainToServers[name] = servers
+
+			var resset []*resolver
+			for _, server := range servers {
+				if res, found := r.serverToResolver[server]; found {
+					resset = append(resset, res)
+				} else {
+					if res := r.serverNameToResolverObj(server, res); res != nil {
+						resset = append(resset, res)
+						r.serverToResolver[server] = res
+						r.list = append(r.list, res)
+						r.lookup[res.address.IP.String()] = res
+					}
+				}
+			}
+
+			if len(resset) > 0 {
+				resolvers = resset
+			}
+		}
+
+		r.fqdnToResolvers[name] = resolvers
+		return false
+	})
 }
 
 func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *resolver {
 	ch := make(chan *dns.Msg, 1)
-	req := request{
-		Res:    res,
-		Msg:    QueryMsg(server, dns.TypeA),
-		Result: ch,
-	}
+	defer close(ch)
 
 	for i := 0; i < 5; i++ {
-		req.Resp = nil
-		res.writeReq(&req)
+		req := request{
+			Res:    res,
+			Msg:    QueryMsg(server, dns.TypeA),
+			Result: ch,
+		}
+		res.queue.Append(&req)
 
 		select {
-		case <-req.Res.done:
+		case <-res.done:
 			return nil
 		case resp := <-ch:
 			if resp != nil && resp.Rcode == dns.RcodeSuccess {
-				if len(resp.Answer) > 0 {
-					if addr, ok := resp.Answer[0].(*dns.A); ok {
-						return r.pool.initResolver(addr.A.String() + ":53")
+				for _, rr := range AnswersByType(resp, dns.TypeA) {
+					if addr, ok := rr.(*dns.A); ok {
+						addr := net.JoinHostPort(addr.A.String(), "53")
+
+						return r.pool.initResolver(addr)
 					}
 				}
 				return nil
 			}
 		}
-
-		time.Sleep(time.Second)
 	}
 	return nil
 }
 
-func getTLDServers(tld string) []string {
-	client := dns.Client{
-		Net:     "tcp",
-		Timeout: time.Minute,
-	}
+func (r *authNSSelector) getNameServers(fqdn string, res *resolver) []string {
+	ch := make(chan *dns.Msg, 1)
+	defer close(ch)
 
 	var servers []string
-	if m, _, err := client.Exchange(QueryMsg(tld, dns.TypeNS), "8.8.8.8:53"); err == nil && m != nil {
-		for _, rr := range AnswersByType(m, dns.TypeNS) {
-			if ns, ok := rr.(*dns.NS); ok {
-				servers = append(servers, strings.ToLower(RemoveLastDot(ns.Ns)))
+loop:
+	for i := 0; i < 5; i++ {
+		req := request{
+			Res:    res,
+			Msg:    QueryMsg(fqdn, dns.TypeNS),
+			Result: ch,
+		}
+		res.queue.Append(&req)
+
+		select {
+		case <-res.done:
+			return nil
+		case resp := <-ch:
+			if resp != nil && resp.Rcode == dns.RcodeSuccess {
+				for _, rr := range AnswersByType(resp, dns.TypeNS) {
+					if record, ok := rr.(*dns.NS); ok {
+						servers = append(servers, strings.ToLower(RemoveLastDot(record.Ns)))
+					}
+				}
+				break loop
 			}
 		}
 	}
+
 	return servers
 }
 

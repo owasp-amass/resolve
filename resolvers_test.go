@@ -18,11 +18,11 @@ import (
 func TestInitializeResolver(t *testing.T) {
 	r := NewResolvers()
 
-	if res := r.initializeResolver("192.168.1.1"); res == nil ||
+	if res := r.initResolver("192.168.1.1"); res == nil ||
 		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
-	if res := r.initializeResolver("300.300.300.300"); res != nil {
+	if res := r.initResolver("300.300.300.300"); res != nil {
 		t.Errorf("failed to detect the invalid IP address provided")
 	}
 }

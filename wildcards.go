@@ -108,7 +108,7 @@ func (r *Resolvers) SetDetectionResolver(addr string) {
 			r.detector = d
 			return
 		}
-		if res := r.initializeResolver(addr); res != nil {
+		if res := r.initResolver(addr); res != nil {
 			r.detector = res
 		}
 	}
