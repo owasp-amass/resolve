@@ -53,13 +53,16 @@ func TestPoolQuery(t *testing.T) {
 
 	r := NewResolvers()
 	_ = r.AddResolvers(addrstr)
+	r.SetTimeout(50 * time.Millisecond)
 	defer r.Stop()
 
 	num := 1000
 	var failures int
 	ch := make(chan *dns.Msg, num)
+	defer close(ch)
+
 	for i := 0; i < num; i++ {
-		r.Query(context.Background(), QueryMsg("pool.net", 1), ch)
+		r.Query(context.Background(), QueryMsg("pool.net", dns.TypeA), ch)
 	}
 	for i := 0; i < num; i++ {
 		if m := <-ch; m == nil || len(m.Answer) == 0 {
@@ -139,7 +142,7 @@ func TestQuery(t *testing.T) {
 
 	var success bool
 	for i := 0; i < 5; i++ {
-		r.Query(context.Background(), QueryMsg("caffix.net", 1), ch)
+		r.Query(context.Background(), QueryMsg("caffix.net", dns.TypeA), ch)
 		if m := <-ch; m != nil && len(m.Answer) > 0 {
 			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 				success = true
@@ -168,7 +171,7 @@ func TestQueryChan(t *testing.T) {
 
 	var success bool
 	for i := 0; i < 5; i++ {
-		ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", 1))
+		ch := r.QueryChan(context.Background(), QueryMsg("caffix.net", dns.TypeA))
 		m := <-ch
 		close(ch)
 
@@ -202,7 +205,7 @@ func TestQueryBlocking(t *testing.T) {
 	var success bool
 	ctx, cancel := context.WithCancel(context.Background())
 	for i := 0; i < 5; i++ {
-		if resp, err := r.QueryBlocking(ctx, QueryMsg(name, 1)); err == nil && resp != nil {
+		if resp, err := r.QueryBlocking(ctx, QueryMsg(name, dns.TypeA)); err == nil && resp != nil {
 			if len(resp.Answer) > 0 {
 				if rrs := AnswersByType(resp, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 					success = true
@@ -217,7 +220,7 @@ func TestQueryBlocking(t *testing.T) {
 
 	cancel()
 	// The query should fail since the context has expired
-	_, err = r.QueryBlocking(ctx, QueryMsg(name, 1))
+	_, err = r.QueryBlocking(ctx, QueryMsg(name, dns.TypeA))
 	if err == nil {
 		t.Errorf("the query did not fail as expected")
 	}
@@ -237,7 +240,7 @@ func TestQueryTimeout(t *testing.T) {
 	_ = r.AddResolvers(addrstr)
 	defer r.Stop()
 
-	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", 1))
+	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", dns.TypeA))
 	if err == nil && len(resp.Answer) > 0 {
 		t.Errorf("the query did not fail as expected")
 	}
@@ -258,12 +261,12 @@ func TestEdgeCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
-	if _, err := r.QueryBlocking(ctx, QueryMsg("google.com", 1)); err == nil {
+	if _, err := r.QueryBlocking(ctx, QueryMsg("google.com", dns.TypeA)); err == nil {
 		t.Errorf("query was successful when provided an expired context")
 	}
 
 	r.Stop()
-	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", 1)); err == nil && len(resp.Answer) > 0 {
+	if resp, err := r.QueryBlocking(context.Background(), QueryMsg("google.com", dns.TypeA)); err == nil && len(resp.Answer) > 0 {
 		t.Errorf("query was successful when provided a stopped Resolver")
 	}
 }
@@ -284,7 +287,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	defer r.Stop()
 	r.conns.Close()
 
-	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, 1))
+	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, dns.TypeA))
 	if err == nil && resp.Rcode != RcodeNoResponse {
 		t.Errorf("the query did not fail as expected")
 	}
@@ -325,8 +328,9 @@ func TestTCPExchange(t *testing.T) {
 	defer r.Stop()
 	res := r.pool.GetResolver(name)
 
-	ch := make(chan *dns.Msg, 2)
-	msg := QueryMsg(name, 1)
+	ch := make(chan *dns.Msg, 1)
+	defer close(ch)
+	msg := QueryMsg(name, dns.TypeA)
 	res.tcpExchange(&request{
 		Res:    res,
 		Msg:    msg,
@@ -360,8 +364,9 @@ func TestBadTCPExchange(t *testing.T) {
 	defer r.Stop()
 	res := r.pool.GetResolver(name)
 
-	ch := make(chan *dns.Msg, 2)
-	msg := QueryMsg(name, 1)
+	ch := make(chan *dns.Msg, 1)
+	defer close(ch)
+	msg := QueryMsg(name, dns.TypeA)
 	res.tcpExchange(&request{
 		Res:    res,
 		Msg:    msg,

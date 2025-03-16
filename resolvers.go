@@ -202,12 +202,12 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		req := reqPool.Get().(*request)
-
-		req.Msg = msg
-		req.Result = ch
-		r.queue.Append(req)
-		return
+		if req := reqPool.Get().(*request); req != nil {
+			req.Msg = msg
+			req.Result = ch
+			r.queue.Append(req)
+			return
+		}
 	}
 
 	msg.Rcode = RcodeNoResponse
@@ -292,16 +292,9 @@ func (r *Resolvers) processResponses() {
 }
 
 func (r *Resolvers) processSingleResp(response *resp) {
-	var res *resolver
 	addr, _, _ := net.SplitHostPort(response.Addr.String())
 
-	if res = r.pool.LookupResolver(addr); res == nil {
-		if detector := r.getDetectionResolver(); detector != nil {
-			if detector.address.IP.String() == addr {
-				res = detector
-			}
-		}
-	}
+	res := r.pool.LookupResolver(addr)
 	if res == nil {
 		return
 	}
@@ -352,7 +345,7 @@ func (r *Resolvers) updateAllRateLimiters() {
 
 func (r *Resolvers) timeouts() {
 	r.Lock()
-	d := r.timeout / 2
+	d := r.timeout
 	r.Unlock()
 
 	t := time.NewTicker(d)
@@ -365,12 +358,7 @@ func (r *Resolvers) timeouts() {
 		default:
 		}
 
-		all := r.pool.AllResolvers()
-		if d := r.getDetectionResolver(); d != nil {
-			all = append(all, d)
-		}
-
-		for _, res := range all {
+		for _, res := range r.pool.AllResolvers() {
 			select {
 			case <-r.done:
 				return
@@ -406,20 +394,24 @@ func (r *resolver) writeReq(req *request) {
 	msg := req.Msg.Copy()
 	req.SentAt = time.Now()
 
-	if r.xchgs.add(req) == nil {
-		if err := r.pool.conns.WriteMsg(msg, r.address); err != nil {
-			_ = r.xchgs.remove(msg.Id, msg.Question[0].Name)
-			req.errNoResponse()
-			req.release()
-		}
+	if err := r.xchgs.add(req); err != nil {
+		req.errNoResponse()
+		req.release()
+	}
+
+	if err := r.pool.conns.WriteMsg(msg, r.address); err != nil {
+		_ = r.xchgs.remove(msg.Id, msg.Question[0].Name)
+		req.errNoResponse()
+		req.release()
 	}
 }
 
 func (r *resolver) tcpExchange(req *request) {
 	client := dns.Client{
 		Net:     "tcp",
-		Timeout: time.Minute,
+		Timeout: 5 * time.Second,
 	}
+
 	if m, _, err := client.Exchange(req.Msg, r.address.String()); err == nil {
 		req.Result <- m
 		r.collectStats(m)

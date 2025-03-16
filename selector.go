@@ -187,16 +187,28 @@ func (r *authNSSelector) GetResolver(fqdn string) *resolver {
 	defer r.Unlock()
 
 	name := strings.ToLower(RemoveLastDot(fqdn))
-	labels := strings.Split(name, ".")
+	if res := r.checkFQDNAndMinusOne(name); res != nil {
+		return res
+	}
+
+	r.populateAuthServers(name)
+	if res := r.checkFQDNAndMinusOne(name); res != nil {
+		return res
+	}
+	return nil
+}
+
+func (r *authNSSelector) checkFQDNAndMinusOne(fqdn string) *resolver {
+	if res, found := r.fqdnToResolvers[fqdn]; found {
+		return pickOneResolver(res)
+	}
+
+	labels := strings.Split(fqdn, ".")
 	if len(labels) > 1 {
-		name = strings.Join(labels[1:], ".")
+		fqdn = strings.Join(labels[1:], ".")
 	}
 
-	if _, found := r.fqdnToResolvers[name]; !found {
-		r.populateAuthServers(name)
-	}
-
-	if res, found := r.fqdnToResolvers[name]; found {
+	if res, found := r.fqdnToResolvers[fqdn]; found {
 		return pickOneResolver(res)
 	}
 	return nil
@@ -290,33 +302,57 @@ func (r *authNSSelector) populateFromLabel(last, fqdn string, resolvers []*resol
 			r.fqdnToServers[name] = servers
 		}
 
+		var updated bool
 		if len(servers) > 0 {
-			var wg sync.WaitGroup
 			var resset []*resolver
+			type servres struct {
+				server string
+				res    *resolver
+			}
+			results := make(chan *servres, len(servers))
+			defer close(results)
 
 			for _, server := range servers {
-				wg.Add(1)
 				go func(name string, res *resolver) {
-					defer wg.Done()
+					result := &servres{server: name, res: nil}
 
 					if fres, found := r.serverToResolver[server]; found {
-						resset = append(resset, fres)
+						result.res = fres
 					} else if nres := r.serverNameToResolverObj(server, res); nres != nil {
-						resset = append(resset, nres)
+						result.res = nres
 						r.list = append(r.list, nres)
 						r.lookup[nres.address.IP.String()] = nres
 						r.serverToResolver[server] = nres
 					}
+
+					results <- result
 				}(server, pickOneResolver(resolvers))
 			}
 
-			wg.Wait()
+			for i := 0; i < len(servers); i++ {
+				result := <-results
+				if result == nil || result.res == nil {
+					continue
+				}
+
+				resset = append(resset, result.res)
+				addrstr := result.res.address.IP.String()
+				if _, found := r.lookup[addrstr]; !found {
+					r.list = append(r.list, result.res)
+					r.lookup[addrstr] = result.res
+					r.serverToResolver[result.server] = result.res
+				}
+			}
+
 			if len(resset) > 0 {
+				updated = true
 				resolvers = resset
 			}
 		}
 
-		r.fqdnToResolvers[name] = resolvers
+		if name != fqdn || updated {
+			r.fqdnToResolvers[name] = resolvers
+		}
 		return false
 	})
 }
