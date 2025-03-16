@@ -134,32 +134,52 @@ func (r *randomSelector) Close() {
 	r.lookup = nil
 }
 
+var rootIPs = []string{
+	"198.41.0.4",
+	"199.9.14.201",
+	"192.33.4.12",
+	"199.7.91.13",
+	"192.203.230.10",
+	"192.5.5.241",
+	"192.112.36.4",
+	"198.97.190.53",
+	"192.36.148.17",
+	"192.58.128.30",
+	"193.0.14.129",
+	"199.7.83.42",
+	"202.12.27.33",
+}
+
 type authNSSelector struct {
 	sync.Mutex
 	update           sync.Mutex
 	pool             *Resolvers
-	root             *resolver
 	list             []*resolver
 	lookup           map[string]*resolver
+	rootResolvers    []*resolver
 	fqdnToServers    map[string][]string
 	fqdnToResolvers  map[string][]*resolver
 	serverToResolver map[string]*resolver
 }
 
 func newAuthNSSelector(r *Resolvers) *authNSSelector {
-	addr := "8.8.8.8:53"
-	google := r.initResolver(addr)
-	host, _, _ := net.SplitHostPort(addr)
-
-	return &authNSSelector{
+	auth := &authNSSelector{
 		pool:             r,
-		root:             google,
-		list:             []*resolver{google},
-		lookup:           map[string]*resolver{host: google},
+		lookup:           make(map[string]*resolver),
 		fqdnToServers:    make(map[string][]string),
 		fqdnToResolvers:  make(map[string][]*resolver),
 		serverToResolver: make(map[string]*resolver),
 	}
+
+	for _, addr := range rootIPs {
+		if res := r.initResolver(addr); res != nil {
+			auth.setLookup(addr, res)
+			auth.rootResolvers = append(auth.rootResolvers, res)
+		}
+	}
+
+	auth.appendToList(auth.rootResolvers)
+	return auth
 }
 
 // GetResolver performs random selection on the pool of resolvers.
@@ -249,10 +269,55 @@ func (r *authNSSelector) populateAuthServers(fqdn string) {
 	}
 
 	labels := strings.Split(fqdn, ".")
-	tld := labels[len(labels)-1]
+	last, resolvers := r.findClosestResolverSet(fqdn, labels[len(labels)-1])
+	if ll := len(labels); ll-1 < len(strings.Split(last, ".")) {
+		return
+	}
 
-	var last string
-	resolvers := []*resolver{r.root}
+	r.populateFromLabel(last, fqdn, resolvers)
+}
+
+func (r *authNSSelector) populateFromLabel(last, fqdn string, resolvers []*resolver) {
+	RegisteredToFQDN(last, fqdn, func(name string) bool {
+		res := pickOneResolver(resolvers)
+
+		if servers := r.getNameServers(name, res); len(servers) > 0 {
+			r.setFQDNToServers(name, servers)
+
+			var wg sync.WaitGroup
+			var resset []*resolver
+			for _, server := range servers {
+				wg.Add(1)
+				go func(name string, res *resolver) {
+					defer wg.Done()
+
+					if fres := r.getServerToResolver(server); fres != nil {
+						resset = append(resset, fres)
+					} else if nres := r.serverNameToResolverObj(server, res); nres != nil {
+						resset = append(resset, nres)
+						r.appendToList([]*resolver{nres})
+						r.setLookup(nres.address.IP.String(), nres)
+						r.setServerToResolver(server, nres)
+					}
+				}(server, pickOneResolver(resolvers))
+			}
+
+			wg.Wait()
+			if len(resset) > 0 {
+				resolvers = resset
+			}
+		}
+
+		r.setFQDNToResolvers(name, resolvers)
+		return false
+	})
+}
+
+func (r *authNSSelector) findClosestResolverSet(fqdn, tld string) (string, []*resolver) {
+	last := fqdn
+	resolvers := make([]*resolver, len(r.rootResolvers))
+	_ = copy(resolvers, r.rootResolvers)
+
 	FQDNToRegistered(fqdn, tld, func(name string) bool {
 		if res := r.getFQDNToResolvers(name); len(res) > 0 {
 			resolvers = res
@@ -262,36 +327,7 @@ func (r *authNSSelector) populateAuthServers(fqdn string) {
 		return false
 	})
 
-	if ll := len(labels); ll-1 < len(strings.Split(last, ".")) {
-		return
-	}
-
-	RegisteredToFQDN(last, fqdn, func(name string) bool {
-		res := pickOneResolver(resolvers)
-
-		if servers := r.getNameServers(name, res); len(servers) > 0 {
-			r.setFQDNToServers(name, servers)
-
-			var resset []*resolver
-			for _, server := range servers {
-				if fres := r.getServerToResolver(server); fres != nil {
-					resset = append(resset, fres)
-				} else if nres := r.serverNameToResolverObj(server, res); nres != nil {
-					resset = append(resset, nres)
-					r.appendToList([]*resolver{nres})
-					r.setLookup(nres.address.IP.String(), nres)
-					r.setServerToResolver(server, nres)
-				}
-			}
-
-			if len(resset) > 0 {
-				resolvers = resset
-			}
-		}
-
-		r.setFQDNToResolvers(name, resolvers)
-		return false
-	})
+	return last, resolvers
 }
 
 func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *resolver {
@@ -314,7 +350,6 @@ func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *
 				for _, rr := range AnswersByType(resp, dns.TypeA) {
 					if addr, ok := rr.(*dns.A); ok {
 						addr := net.JoinHostPort(addr.A.String(), "53")
-
 						return r.pool.initResolver(addr)
 					}
 				}

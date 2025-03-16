@@ -41,7 +41,7 @@ func TestServerNameToResolverObj(t *testing.T) {
 
 	auth := r.pool.(*authNSSelector)
 	r.SetTimeout(500 * time.Millisecond)
-	res := auth.serverNameToResolverObj("a.edu-servers.net", auth.root)
+	res := auth.serverNameToResolverObj("a.edu-servers.net", pickOneResolver(auth.rootResolvers))
 	if res == nil {
 		t.Errorf("Failed to obtain the resolver object for a.edu-servers.net")
 	}
@@ -69,7 +69,7 @@ func TestGetNameServers(t *testing.T) {
 
 	auth := r.pool.(*authNSSelector)
 	r.SetTimeout(500 * time.Millisecond)
-	servers := auth.getNameServers("edu", auth.root)
+	servers := auth.getNameServers("edu", pickOneResolver(auth.rootResolvers))
 	if len(servers) == 0 {
 		t.Errorf("Failed to obtain the .edu servers")
 		return
