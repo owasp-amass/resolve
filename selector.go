@@ -270,7 +270,7 @@ func (r *authNSSelector) populateAuthServers(fqdn string) {
 
 	labels := strings.Split(fqdn, ".")
 	last, resolvers := r.findClosestResolverSet(fqdn, labels[len(labels)-1])
-	if ll := len(labels); ll-1 < len(strings.Split(last, ".")) {
+	if len(labels) < len(strings.Split(last, ".")) {
 		return
 	}
 
