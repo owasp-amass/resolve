@@ -284,11 +284,16 @@ func (r *authNSSelector) populateFromLabel(last, fqdn string, resolvers []*resol
 	RegisteredToFQDN(last, fqdn, func(name string) bool {
 		res := pickOneResolver(resolvers)
 
-		if servers := r.getNameServers(name, res); len(servers) > 0 {
+		servers, found := r.fqdnToServers[name]
+		if !found {
+			servers = r.getNameServers(name, res)
 			r.fqdnToServers[name] = servers
+		}
 
+		if len(servers) > 0 {
 			var wg sync.WaitGroup
 			var resset []*resolver
+
 			for _, server := range servers {
 				wg.Add(1)
 				go func(name string, res *resolver) {
@@ -310,6 +315,7 @@ func (r *authNSSelector) populateFromLabel(last, fqdn string, resolvers []*resol
 				resolvers = resset
 			}
 		}
+
 		r.fqdnToResolvers[name] = resolvers
 		return false
 	})
