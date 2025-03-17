@@ -221,21 +221,20 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.R
 }
 
 func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []dns.RR {
-	ch := make(chan *dns.Msg, 1)
-	defer close(ch)
-
 	detector := r.getDetectionResolver()
 	if detector == nil {
 		return nil
 	}
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
-		req := &request{
+		ch := make(chan *dns.Msg, 1)
+		defer close(ch)
+
+		go detector.sendRequest(&request{
 			Res:    detector,
 			Msg:    QueryMsg(name, qtype),
 			Result: ch,
-		}
-		detector.sendRequest(req, r.conns)
+		}, r.conns)
 
 		select {
 		case <-ctx.Done():

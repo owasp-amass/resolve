@@ -47,7 +47,6 @@ func NewConnPool(cpus int, sel Selector) *ConnPool {
 		_ = conns.Add()
 	}
 
-	//go conns.rotations()
 	return conns
 }
 
@@ -65,47 +64,6 @@ func (r *ConnPool) Close() {
 	}
 }
 
-/*
-	func (r *ConnPool) rotations() {
-		t := time.NewTicker(10 * time.Second)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-r.done:
-				return
-			case <-t.C:
-				r.rotate()
-			}
-		}
-	}
-
-	func (r *ConnPool) rotate() {
-		r.Lock()
-		defer r.Unlock()
-
-		old := make([]*connection, len(r.conns))
-		copy(old, r.conns)
-
-		r.conns = []*connection{}
-		for i := 0; i < r.cpus; i++ {
-			_ = r.Add()
-		}
-
-		go closeOldConnections(old, 3*time.Second)
-	}
-
-	func closeOldConnections(old []*connection, delay time.Duration) {
-		t := time.NewTimer(delay)
-		defer t.Stop()
-
-		<-t.C
-		for _, c := range old {
-			close(c.done)
-			_ = c.conn.Close()
-		}
-	}
-*/
 func (r *ConnPool) Next() net.PacketConn {
 	r.Lock()
 	defer r.Unlock()
@@ -145,10 +103,7 @@ func (r *ConnPool) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 		err = errors.New("failed to obtain a connection")
 
 		if conn := r.Next(); conn != nil {
-			_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-
-			n, err = conn.WriteTo(out, addr)
-			if err == nil && n < len(out) {
+			if n, err = conn.WriteTo(out, addr); err == nil && n < len(out) {
 				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 			}
 		}

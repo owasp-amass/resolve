@@ -115,7 +115,6 @@ func TestQuery(t *testing.T) {
 	defer r.Stop()
 	defer sel.Close()
 	defer conns.Close()
-	r.SetDetectionResolver("8.8.4.4")
 
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
