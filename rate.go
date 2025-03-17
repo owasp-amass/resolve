@@ -45,40 +45,32 @@ func (r *rateTrack) Take() {
 
 // ReportResponseTime provides the response time for a request.
 func (r *rateTrack) ReportRTT(rtt time.Duration) {
-	var average, count float64
+	r.Lock()
+	defer r.Unlock()
 
 	if rtt > minInterval {
 		rtt = minInterval
 	}
 
-	r.Lock()
 	r.count++
-	count = float64(r.count)
-	average = float64(r.avg.Milliseconds())
+	count := float64(r.count)
+	average := float64(r.avg.Milliseconds())
 	average = ((average * (count - 1)) + float64(rtt.Milliseconds())) / count
 	r.avg = time.Duration(math.Round(average)) * time.Millisecond
 	first := r.first
 
-	var update bool
 	if first {
-		update = true
+		r.update()
 		r.first = false
 		r.updateTime = time.Now()
 	} else if r.count >= minUpdateSampleSize && time.Since(r.updateTime) >= rateUpdateInterval {
-		update = true
-		r.updateTime = time.Now()
-	}
-	r.Unlock()
-
-	if update {
 		r.update()
+		r.updateTime = time.Now()
 	}
 }
 
+// update the QPS rate limiter and reset counters
 func (r *rateTrack) update() {
-	r.Lock()
-	defer r.Unlock()
-	// update the QPS rate limiter and reset counters
 	r.limiter.SetLimit(rate.Every(r.avg))
 	r.avg = 0
 	r.count = 0

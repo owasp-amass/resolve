@@ -97,12 +97,9 @@ func closeOldConnections(old []*connection, delay time.Duration) {
 	t := time.NewTimer(delay)
 	defer t.Stop()
 
+	<-t.C
 	for _, c := range old {
-		select {
-		case <-c.done:
-		case <-t.C:
-			close(c.done)
-		}
+		close(c.done)
 	}
 }
 
