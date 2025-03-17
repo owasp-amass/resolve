@@ -100,6 +100,7 @@ func closeOldConnections(old []*connection, delay time.Duration) {
 	<-t.C
 	for _, c := range old {
 		close(c.done)
+		_ = c.conn.Close()
 	}
 }
 
@@ -159,12 +160,10 @@ func (r *ConnPool) responses(c *connection) {
 	for {
 		select {
 		case <-c.done:
-			_ = c.conn.Close()
 			return
 		default:
 		}
 
-		_ = c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		if n, addr, err := c.conn.ReadFrom(b); err == nil && n >= headerSize {
 			at := time.Now()
 			m := new(dns.Msg)
