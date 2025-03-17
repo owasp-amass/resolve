@@ -22,10 +22,11 @@ const (
 
 type rateTrack struct {
 	sync.Mutex
-	limiter *rate.Limiter
-	avg     time.Duration
-	count   int
-	first   bool
+	limiter    *rate.Limiter
+	avg        time.Duration
+	count      int
+	first      bool
+	updateTime time.Time
 }
 
 func newRateTrack() *rateTrack {
@@ -43,23 +44,26 @@ func (r *rateTrack) Take() {
 }
 
 // ReportResponseTime provides the response time for a request.
-func (r *rateTrack) ReportResponseTime(delta time.Duration) {
+func (r *rateTrack) ReportRTT(rtt time.Duration) {
 	var average, count float64
 
-	if delta > minInterval {
-		delta = minInterval
+	if rtt > minInterval {
+		rtt = minInterval
 	}
 
 	r.Lock()
 	r.count++
 	count = float64(r.count)
 	average = float64(r.avg.Milliseconds())
-	average = ((average * (count - 1)) + float64(delta.Milliseconds())) / count
+	average = ((average * (count - 1)) + float64(rtt.Milliseconds())) / count
 	r.avg = time.Duration(math.Round(average)) * time.Millisecond
 	first := r.first
 	r.Unlock()
 
 	if first {
+		r.update()
+		r.first = false
+	} else if r.count >= minUpdateSampleSize && time.Since(r.updateTime) >= rateUpdateInterval {
 		r.update()
 	}
 }
@@ -67,14 +71,9 @@ func (r *rateTrack) ReportResponseTime(delta time.Duration) {
 func (rt *rateTrack) update() {
 	rt.Lock()
 	defer rt.Unlock()
-
-	if rt.first {
-		rt.first = false
-	} else if rt.count < minUpdateSampleSize {
-		return
-	}
 	// update the QPS rate limiter and reset counters
 	rt.limiter.SetLimit(rate.Every(rt.avg))
 	rt.avg = 0
 	rt.count = 0
+	rt.updateTime = time.Now()
 }

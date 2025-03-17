@@ -13,7 +13,7 @@ func TestUpdateRateLimiters(t *testing.T) {
 	rt := newRateTrack()
 	rt.Take()
 
-	rt.ReportResponseTime(500 * time.Millisecond)
+	rt.ReportRTT(500 * time.Millisecond)
 
 	rt.Lock()
 	limit := rt.limiter.Limit()

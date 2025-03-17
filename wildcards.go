@@ -108,7 +108,7 @@ func (r *Resolvers) SetDetectionResolver(addr string) {
 			r.detector = d
 			return
 		}
-		if res := r.initResolver(addr); res != nil {
+		if res := NewResolver(addr, r.timeout); res != nil {
 			r.detector = res
 			r.pool.AddResolver(res)
 		}
@@ -235,7 +235,7 @@ loop:
 			Msg:    QueryMsg(name, qtype),
 			Result: ch,
 		}
-		detector.sendRequest(req)
+		detector.sendRequest(req, r.conns)
 
 		select {
 		case <-ctx.Done():

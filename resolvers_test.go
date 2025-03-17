@@ -15,29 +15,30 @@ import (
 	"github.com/miekg/dns"
 )
 
-func TestInitializeResolver(t *testing.T) {
-	r := NewResolvers()
-	defer r.Stop()
+func initResolverPool(addrstr string) (*Resolvers, Selector, *ConnPool) {
+	var sel Selector
+	timeout := 50 * time.Millisecond
 
-	if res := r.initResolver("192.168.1.1"); res == nil ||
+	if addrstr == "" {
+		sel = NewAuthNSSelector(timeout)
+	} else {
+		sel = NewRandomSelector()
+		sel.AddResolver(NewResolver(addrstr, timeout))
+	}
+
+	conns := NewConnPool(1, sel)
+	return NewResolvers(0, timeout, sel, conns), sel, conns
+}
+
+func TestInitializeResolver(t *testing.T) {
+	timeout := 50 * time.Millisecond
+
+	if res := NewResolver("192.168.1.1", timeout); res == nil ||
 		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
-	if res := r.initResolver("300.300.300.300"); res != nil {
+	if res := NewResolver("300.300.300.300", timeout); res != nil {
 		t.Errorf("failed to detect the invalid IP address provided")
-	}
-}
-
-func TestSetTimeout(t *testing.T) {
-	r := NewResolvers()
-	_ = r.AddResolvers("8.8.8.8")
-	defer r.Stop()
-
-	timeout := 500 * time.Millisecond
-	r.SetTimeout(timeout)
-
-	if r.timeout != timeout || r.pool.GetResolver("caffix.net").xchgs.timeout != timeout {
-		t.Errorf("failed to set the new timeout value throughout the resolver pool")
 	}
 }
 
@@ -51,10 +52,10 @@ func TestPoolQuery(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
-	r.SetTimeout(50 * time.Millisecond)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	num := 1000
 	var failures int
@@ -76,28 +77,11 @@ func TestPoolQuery(t *testing.T) {
 	}
 }
 
-func TestAddLogger(t *testing.T) {
-	r := NewResolvers()
-	defer r.Stop()
-
-	r.SetLogger(nil)
-	if r.log != nil {
-		t.Errorf("failed to set the resolver pool logger")
-	}
-}
-
-func TestAddResolvers(t *testing.T) {
-	r := NewResolvers()
-	defer r.Stop()
-	// Test that the resolver is added with a QPS greater than zero
-	if err := r.AddResolvers("8.8.8.8"); err != nil {
-		t.Errorf("the resolver was not added with a QPS greater than zero")
-	}
-}
-
 func TestStopped(t *testing.T) {
-	r := NewResolvers()
-	_ = r.AddResolvers("8.8.8.8")
+	r, sel, conns := initResolverPool("8.8.8.8")
+	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	// The resolver should not be considered stopped
 	select {
@@ -127,9 +111,10 @@ func TestQuery(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 	r.SetDetectionResolver("8.8.4.4")
 
 	ch := make(chan *dns.Msg, 1)
@@ -165,9 +150,10 @@ func TestQueryChan(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	var success bool
 	for i := 0; i < 5; i++ {
@@ -198,9 +184,10 @@ func TestQueryBlocking(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	var success bool
 	ctx, cancel := context.WithCancel(context.Background())
@@ -236,9 +223,10 @@ func TestQueryTimeout(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg("timeout.org", dns.TypeA))
 	if err == nil && len(resp.Answer) > 0 {
@@ -256,8 +244,9 @@ func TestEdgeCases(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
+	defer sel.Close()
+	defer conns.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
@@ -282,10 +271,10 @@ func TestBadWriteNextMsg(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
-	r.conns.Close()
+	defer sel.Close()
+	conns.Close()
 
 	resp, err := r.QueryBlocking(context.Background(), QueryMsg(name, dns.TypeA))
 	if err == nil && resp.Rcode != RcodeNoResponse {
@@ -304,9 +293,10 @@ func TestTruncatedMsgs(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	// Perform the query to call the TCP exchange
 	_, _ = r.QueryBlocking(context.Background(), QueryMsg(name, 1))
@@ -323,9 +313,10 @@ func TestTCPExchange(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 	res := r.pool.GetResolver(name)
 
 	ch := make(chan *dns.Msg, 1)
@@ -359,9 +350,10 @@ func TestBadTCPExchange(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 	res := r.pool.GetResolver(name)
 
 	ch := make(chan *dns.Msg, 1)

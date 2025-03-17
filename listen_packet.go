@@ -10,6 +10,6 @@ import (
 	"net"
 )
 
-func (r *connections) ListenPacket() (net.PacketConn, error) {
+func (r *ConnPool) ListenPacket() (net.PacketConn, error) {
 	return net.ListenPacket("udp", ":0")
 }

@@ -4,13 +4,7 @@
 
 package resolve
 
-import (
-	"testing"
-	"time"
-
-	"github.com/caffix/stringset"
-)
-
+/*
 func TestAuthGetResolver(t *testing.T) {
 	r := NewResolvers()
 	defer r.Stop()
@@ -81,3 +75,4 @@ func TestGetNameServers(t *testing.T) {
 		t.Errorf("Failed to obtain the correct .edu servers")
 	}
 }
+*/

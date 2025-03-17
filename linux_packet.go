@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (r *connections) ListenPacket() (net.PacketConn, error) {
+func (r *ConnPool) ListenPacket() (net.PacketConn, error) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			var operr error

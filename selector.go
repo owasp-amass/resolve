@@ -14,7 +14,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-type selector interface {
+type Selector interface {
 	// GetResolver returns a resolver managed by the selector.
 	GetResolver(fqdn string) *resolver
 
@@ -40,7 +40,7 @@ type randomSelector struct {
 	lookup map[string]*resolver
 }
 
-func newRandomSelector() *randomSelector {
+func NewRandomSelector() *randomSelector {
 	return &randomSelector{lookup: make(map[string]*resolver)}
 }
 
@@ -153,7 +153,7 @@ var rootIPs = []string{
 
 type authNSSelector struct {
 	sync.Mutex
-	pool             *Resolvers
+	timeout          time.Duration
 	list             []*resolver
 	lookup           map[string]*resolver
 	rootResolvers    []*resolver
@@ -162,9 +162,9 @@ type authNSSelector struct {
 	serverToResolver map[string]*resolver
 }
 
-func newAuthNSSelector(r *Resolvers) *authNSSelector {
+func NewAuthNSSelector(timeout time.Duration) *authNSSelector {
 	auth := &authNSSelector{
-		pool:             r,
+		timeout:          timeout,
 		lookup:           make(map[string]*resolver),
 		fqdnToServers:    make(map[string][]string),
 		fqdnToResolvers:  make(map[string][]*resolver),
@@ -172,7 +172,7 @@ func newAuthNSSelector(r *Resolvers) *authNSSelector {
 	}
 
 	for _, addr := range rootIPs {
-		if res := r.initResolver(addr); res != nil {
+		if res := NewResolver(addr, timeout); res != nil {
 			auth.lookup[addr] = res
 			auth.list = append(auth.list, res)
 			auth.rootResolvers = append(auth.rootResolvers, res)
@@ -385,7 +385,7 @@ func (r *authNSSelector) serverNameToResolverObj(server string, res *resolver) *
 			for _, rr := range AnswersByType(m, dns.TypeA) {
 				if record, ok := rr.(*dns.A); ok {
 					ip := net.JoinHostPort(record.A.String(), "53")
-					return r.pool.initResolver(ip)
+					return NewResolver(ip, r.timeout)
 				}
 			}
 			break

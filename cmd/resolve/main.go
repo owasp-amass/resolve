@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -144,25 +145,31 @@ func (p *params) SetupFiles(lpath, opath, ipath string) error {
 }
 
 func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int, detector string) error {
-	p.Pool = resolve.NewResolvers()
+	// Set the DNS query timeout value using the provided interval
+	if timeout == 0 {
+		timeout = 500
+	}
+	delay := time.Duration(timeout) * time.Millisecond
 
+	var sel resolve.Selector
 	// Load DNS resolvers into the pool
 	if rpath != "" {
 		list = append(list, ResolverFileList(rpath)...)
 	}
 	if len(list) > 0 {
-		if err := p.Pool.AddResolvers(list...); err != nil {
-			p.Pool.Stop()
-			return fmt.Errorf("failed to add the resolvers at a QPS of %d: %v", p.QPS, err)
+		sel = resolve.NewRandomSelector()
+
+		for _, addr := range list {
+			if res := resolve.NewResolver(addr, delay); res != nil {
+				sel.AddResolver(res)
+			}
 		}
+	} else {
+		sel = resolve.NewAuthNSSelector(delay)
 	}
-	if qps > 0 {
-		p.Pool.SetMaxQPS(qps)
-	}
-	// Set the DNS query timeout value using the provided interval
-	if timeout > 0 {
-		p.Pool.SetTimeout(time.Duration(timeout) * time.Millisecond)
-	}
+
+	conns := resolve.NewConnPool(runtime.NumCPU(), sel)
+	p.Pool = resolve.NewResolvers(qps, delay, sel, conns)
 	// Attempt to set a resolver to perform DNS wildcard detection
 	if detector != "" {
 		if _, _, err := net.SplitHostPort(detector); err != nil && net.ParseIP(detector) == nil {

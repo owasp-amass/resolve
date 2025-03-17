@@ -14,8 +14,10 @@ import (
 )
 
 func TestSetDetectionResolver(t *testing.T) {
-	r := NewResolvers()
+	r, sel, conns := initResolverPool("")
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	r.SetDetectionResolver("8.8.8.8")
 	if r.detector == nil {
@@ -34,9 +36,10 @@ func TestWildcardDetected(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r := NewResolvers()
-	_ = r.AddResolvers(addrstr)
+	r, sel, conns := initResolverPool(addrstr)
 	defer r.Stop()
+	defer sel.Close()
+	defer conns.Close()
 
 	cases := []struct {
 		label string

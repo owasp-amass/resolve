@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"runtime"
 	"sync"
 	"time"
 
@@ -24,12 +23,10 @@ type Resolvers struct {
 	sync.Mutex
 	done      chan struct{}
 	log       *log.Logger
-	conns     *connections
-	pool      selector
+	conns     *ConnPool
+	pool      Selector
 	wildcards map[string]*wildcard
 	queue     queue.Queue
-	resps     queue.Queue
-	qps       int
 	rate      *rate.Limiter
 	detector  *resolver
 	timeout   time.Duration
@@ -37,13 +34,12 @@ type Resolvers struct {
 
 type resolver struct {
 	done    chan struct{}
-	pool    *Resolvers
 	xchgs   *xchgMgr
 	address *net.UDPAddr
 	rate    *rateTrack
 }
 
-func (r *Resolvers) initResolver(addr string) *resolver {
+func NewResolver(addr string, timeout time.Duration) *resolver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
@@ -53,8 +49,7 @@ func (r *Resolvers) initResolver(addr string) *resolver {
 	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
 		res = &resolver{
 			done:    make(chan struct{}, 1),
-			pool:    r,
-			xchgs:   newXchgMgr(r.timeout),
+			xchgs:   newXchgMgr(timeout),
 			address: uaddr,
 			rate:    newRateTrack(),
 		}
@@ -78,79 +73,36 @@ func (r *resolver) stop() {
 }
 
 // NewResolvers initializes a Resolvers.
-func NewResolvers() *Resolvers {
-	responses := queue.NewQueue()
+func NewResolvers(qps int, timeout time.Duration, sel Selector, conns *ConnPool) *Resolvers {
+	limit := rate.Inf
+	if qps > 0 {
+		limit = rate.Limit(qps)
+	}
+
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+
 	r := &Resolvers{
 		done:      make(chan struct{}, 1),
 		log:       log.New(io.Discard, "", 0),
-		conns:     newConnections(runtime.NumCPU(), responses),
+		conns:     conns,
+		pool:      sel,
 		wildcards: make(map[string]*wildcard),
 		queue:     queue.NewQueue(),
-		resps:     responses,
-		rate:      rate.NewLimiter(rate.Inf, 1),
-		timeout:   DefaultTimeout,
-	}
-
-	r.pool = newAuthNSSelector(r)
-	if r.pool == nil {
-		r.conns.Close()
-		return nil
+		rate:      rate.NewLimiter(limit, 1),
+		timeout:   timeout,
 	}
 
 	go r.timeouts()
 	go r.enforceMaxQPS()
-	go r.processResponses()
-	go r.updateRateLimiters()
 	return r
-}
-
-// SetLogger assigns a new logger to the resolver pool.
-func (r *Resolvers) SetLogger(l *log.Logger) {
-	r.log = l
-}
-
-// SetTimeout updates the amount of time this pool will wait for response messages.
-func (r *Resolvers) SetTimeout(d time.Duration) {
-	r.Lock()
-	r.timeout = d
-	r.Unlock()
-
-	r.updateResolverTimeouts()
-}
-
-func (r *Resolvers) updateResolverTimeouts() {
-	r.Lock()
-	all := r.pool.AllResolvers()
-	r.Unlock()
-
-	for _, res := range all {
-		select {
-		case <-res.done:
-		default:
-			res.xchgs.setTimeout(r.timeout)
-		}
-	}
-}
-
-// SetMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
-func (r *Resolvers) SetMaxQPS(qps int) {
-	r.Lock()
-	defer r.Unlock()
-
-	if qps > 0 {
-		r.qps = qps
-		r.rate.SetLimit(rate.Limit(qps))
-	}
 }
 
 // AddResolvers initializes and adds new resolvers to the pool of resolvers.
 func (r *Resolvers) AddResolvers(addrs ...string) error {
-	r.Lock()
-	defer r.Unlock()
-
-	if sel, ok := r.pool.(*authNSSelector); ok {
-		sel.Close()
-		r.pool = newRandomSelector()
+	if _, ok := r.pool.(*authNSSelector); ok {
+		return nil
 	}
 
 	for _, addr := range addrs {
@@ -162,7 +114,7 @@ func (r *Resolvers) AddResolvers(addrs ...string) error {
 		if res := r.pool.LookupResolver(addr); res != nil {
 			continue
 		}
-		if res := r.initResolver(addr); res != nil {
+		if res := NewResolver(addr, r.timeout); res != nil {
 			r.pool.AddResolver(res)
 		}
 	}
@@ -171,17 +123,12 @@ func (r *Resolvers) AddResolvers(addrs ...string) error {
 
 // Stop will release resources for the resolver pool and all add resolvers.
 func (r *Resolvers) Stop() {
-	r.Lock()
-	defer r.Unlock()
-
 	select {
 	case <-r.done:
 		return
 	default:
 	}
 	close(r.done)
-	r.conns.Close()
-	r.pool.Close()
 }
 
 // Query queues the provided DNS message and returns the response on the provided channel.
@@ -264,13 +211,9 @@ loop:
 func (r *Resolvers) processSingleReq(req *request) {
 	name := req.Msg.Question[0].Name
 
-	r.Lock()
-	res := r.pool.GetResolver(name)
-	r.Unlock()
-
-	if res != nil {
+	if res := r.pool.GetResolver(name); res != nil {
 		req.Res = res
-		res.sendRequest(req)
+		res.sendRequest(req, r.conns)
 		return
 	}
 
@@ -278,87 +221,8 @@ func (r *Resolvers) processSingleReq(req *request) {
 	req.release()
 }
 
-func (r *Resolvers) processResponses() {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-t.C:
-		case <-r.resps.Signal():
-		}
-
-		r.resps.Process(func(element interface{}) {
-			if response, ok := element.(*resp); ok && response != nil {
-				go r.processSingleResp(response)
-			}
-		})
-	}
-}
-
-func (r *Resolvers) processSingleResp(response *resp) {
-	addr, _, _ := net.SplitHostPort(response.Addr.String())
-
-	r.Lock()
-	res := r.pool.LookupResolver(addr)
-	r.Unlock()
-
-	if res == nil {
-		return
-	}
-
-	msg := response.Msg
-	name := msg.Question[0].Name
-	if req := res.xchgs.remove(msg.Id, name); req != nil {
-		req.Resp = msg
-		if req.Resp.Truncated {
-			go req.Res.tcpExchange(req)
-		} else {
-			req.Result <- req.Resp
-			delta := req.RecvAt.Sub(req.SentAt)
-			req.Res.rate.ReportResponseTime(delta)
-			req.release()
-		}
-	}
-}
-
-func (r *Resolvers) updateRateLimiters() {
-	t := time.NewTimer(rateUpdateInterval)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-t.C:
-			r.updateAllRateLimiters()
-			t.Reset(rateUpdateInterval)
-		}
-	}
-}
-
-func (r *Resolvers) updateAllRateLimiters() {
-	r.Lock()
-	all := r.pool.AllResolvers()
-	r.Unlock()
-
-	for _, res := range all {
-		select {
-		case <-res.done:
-		default:
-			res.rate.update()
-		}
-	}
-}
-
 func (r *Resolvers) timeouts() {
-	r.Lock()
-	d := r.timeout
-	r.Unlock()
-
-	t := time.NewTimer(d)
+	t := time.NewTimer(r.timeout)
 	defer t.Stop()
 
 	for range t.C {
@@ -368,11 +232,7 @@ func (r *Resolvers) timeouts() {
 		default:
 		}
 
-		r.Lock()
-		all := r.pool.AllResolvers()
-		r.Unlock()
-
-		for _, res := range all {
+		for _, res := range r.pool.AllResolvers() {
 			select {
 			case <-r.done:
 				return
@@ -384,11 +244,15 @@ func (r *Resolvers) timeouts() {
 			}
 		}
 
-		t.Reset(d)
+		t.Reset(r.timeout)
 	}
 }
 
-func (r *resolver) sendRequest(req *request) {
+func (r *resolver) sendRequest(req *request, conns *ConnPool) {
+	if req == nil {
+		return
+	}
+
 	select {
 	case <-r.done:
 		req.errNoResponse()
@@ -398,10 +262,16 @@ func (r *resolver) sendRequest(req *request) {
 	}
 
 	r.rate.Take()
-	r.writeReq(req)
+	r.writeReq(req, conns)
 }
 
-func (r *resolver) writeReq(req *request) {
+func (r *resolver) writeReq(req *request, conns *ConnPool) {
+	if conns == nil {
+		req.errNoResponse()
+		req.release()
+		return
+	}
+
 	msg := req.Msg.Copy()
 	req.SentAt = time.Now()
 
@@ -410,7 +280,7 @@ func (r *resolver) writeReq(req *request) {
 		req.release()
 	}
 
-	if err := r.pool.conns.WriteMsg(msg, r.address); err != nil {
+	if err := conns.WriteMsg(msg, r.address); err != nil {
 		_ = r.xchgs.remove(msg.Id, msg.Question[0].Name)
 		req.errNoResponse()
 		req.release()

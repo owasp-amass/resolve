@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caffix/queue"
 	"github.com/miekg/dns"
 )
 
@@ -28,20 +27,20 @@ type connection struct {
 	done chan struct{}
 }
 
-type connections struct {
+type ConnPool struct {
 	sync.Mutex
 	done      chan struct{}
 	conns     []*connection
-	resps     queue.Queue
+	sel       Selector
 	nextWrite int
 	cpus      int
 }
 
-func newConnections(cpus int, resps queue.Queue) *connections {
-	conns := &connections{
-		resps: resps,
-		done:  make(chan struct{}),
-		cpus:  cpus,
+func NewConnPool(cpus int, sel Selector) *ConnPool {
+	conns := &ConnPool{
+		done: make(chan struct{}),
+		sel:  sel,
+		cpus: cpus,
 	}
 
 	for i := 0; i < cpus; i++ {
@@ -52,7 +51,7 @@ func newConnections(cpus int, resps queue.Queue) *connections {
 	return conns
 }
 
-func (r *connections) Close() {
+func (r *ConnPool) Close() {
 	r.Lock()
 	defer r.Unlock()
 
@@ -65,8 +64,8 @@ func (r *connections) Close() {
 	}
 }
 
-func (r *connections) rotations() {
-	t := time.NewTicker(5 * time.Second)
+func (r *ConnPool) rotations() {
+	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 
 	for {
@@ -79,7 +78,7 @@ func (r *connections) rotations() {
 	}
 }
 
-func (r *connections) rotate() {
+func (r *ConnPool) rotate() {
 	r.Lock()
 	defer r.Unlock()
 
@@ -107,7 +106,7 @@ func closeOldConnections(old []*connection, delay time.Duration) {
 	}
 }
 
-func (r *connections) Next() net.PacketConn {
+func (r *ConnPool) Next() net.PacketConn {
 	r.Lock()
 	defer r.Unlock()
 
@@ -120,7 +119,7 @@ func (r *connections) Next() net.PacketConn {
 	return r.conns[cur].conn
 }
 
-func (r *connections) Add() error {
+func (r *ConnPool) Add() error {
 	conn, err := r.ListenPacket()
 	if err != nil {
 		return err
@@ -131,12 +130,13 @@ func (r *connections) Add() error {
 		conn: conn,
 		done: make(chan struct{}),
 	}
-	r.conns = append(r.conns, c)
 	go r.responses(c)
+
+	r.conns = append(r.conns, c)
 	return nil
 }
 
-func (r *connections) WriteMsg(msg *dns.Msg, addr net.Addr) error {
+func (r *ConnPool) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	var n int
 	var err error
 	var out []byte
@@ -156,7 +156,7 @@ func (r *connections) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	return err
 }
 
-func (r *connections) responses(c *connection) {
+func (r *ConnPool) responses(c *connection) {
 	b := make([]byte, dns.DefaultMsgSize)
 
 	for {
@@ -166,17 +166,42 @@ func (r *connections) responses(c *connection) {
 			return
 		default:
 		}
+
+		_ = c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		if n, addr, err := c.conn.ReadFrom(b); err == nil && n >= headerSize {
 			at := time.Now()
 			m := new(dns.Msg)
 
 			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
-				r.resps.Append(&resp{
+				go r.processResponse(&resp{
 					Msg:  m,
 					Addr: addr,
 					At:   at,
 				})
 			}
+		}
+	}
+}
+
+func (r *ConnPool) processResponse(response *resp) {
+	addr, _, _ := net.SplitHostPort(response.Addr.String())
+
+	res := r.sel.LookupResolver(addr)
+	if res == nil {
+		return
+	}
+
+	msg := response.Msg
+	name := msg.Question[0].Name
+	if req := res.xchgs.remove(msg.Id, name); req != nil {
+		req.Resp = msg
+		if req.Resp.Truncated {
+			req.Res.tcpExchange(req)
+		} else {
+			req.Result <- req.Resp
+			rtt := req.RecvAt.Sub(req.SentAt)
+			req.Res.rate.ReportRTT(rtt)
+			req.release()
 		}
 	}
 }
