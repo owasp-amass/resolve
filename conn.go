@@ -47,7 +47,7 @@ func NewConnPool(cpus int, sel Selector) *ConnPool {
 		_ = conns.Add()
 	}
 
-	go conns.rotations()
+	//go conns.rotations()
 	return conns
 }
 
@@ -59,51 +59,53 @@ func (r *ConnPool) Close() {
 		close(r.done)
 		for _, c := range r.conns {
 			close(c.done)
+			_ = c.conn.Close()
 		}
 		r.conns = nil
 	}
 }
 
-func (r *ConnPool) rotations() {
-	t := time.NewTicker(10 * time.Second)
-	defer t.Stop()
+/*
+	func (r *ConnPool) rotations() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
 
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-t.C:
-			r.rotate()
+		for {
+			select {
+			case <-r.done:
+				return
+			case <-t.C:
+				r.rotate()
+			}
 		}
 	}
-}
 
-func (r *ConnPool) rotate() {
-	r.Lock()
-	defer r.Unlock()
+	func (r *ConnPool) rotate() {
+		r.Lock()
+		defer r.Unlock()
 
-	old := make([]*connection, len(r.conns))
-	copy(old, r.conns)
+		old := make([]*connection, len(r.conns))
+		copy(old, r.conns)
 
-	r.conns = []*connection{}
-	for i := 0; i < r.cpus; i++ {
-		_ = r.Add()
+		r.conns = []*connection{}
+		for i := 0; i < r.cpus; i++ {
+			_ = r.Add()
+		}
+
+		go closeOldConnections(old, 3*time.Second)
 	}
 
-	go closeOldConnections(old, 3*time.Second)
-}
+	func closeOldConnections(old []*connection, delay time.Duration) {
+		t := time.NewTimer(delay)
+		defer t.Stop()
 
-func closeOldConnections(old []*connection, delay time.Duration) {
-	t := time.NewTimer(delay)
-	defer t.Stop()
-
-	<-t.C
-	for _, c := range old {
-		close(c.done)
-		_ = c.conn.Close()
+		<-t.C
+		for _, c := range old {
+			close(c.done)
+			_ = c.conn.Close()
+		}
 	}
-}
-
+*/
 func (r *ConnPool) Next() net.PacketConn {
 	r.Lock()
 	defer r.Unlock()
