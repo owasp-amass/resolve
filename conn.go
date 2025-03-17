@@ -66,7 +66,7 @@ func (r *connections) Close() {
 }
 
 func (r *connections) rotations() {
-	t := time.NewTicker(30 * time.Second)
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 
 	for {
@@ -83,13 +83,25 @@ func (r *connections) rotate() {
 	r.Lock()
 	defer r.Unlock()
 
-	for _, c := range r.conns {
-		close(c.done)
-	}
-
+	old := r.conns
 	r.conns = []*connection{}
 	for i := 0; i < r.cpus; i++ {
 		_ = r.Add()
+	}
+
+	go closeOldConnections(old, 3*time.Second)
+}
+
+func closeOldConnections(old []*connection, delay time.Duration) {
+	t := time.NewTimer(delay)
+	defer t.Stop()
+
+	for _, c := range old {
+		select {
+		case <-c.done:
+		case <-t.C:
+			close(c.done)
+		}
 	}
 }
 

@@ -33,7 +33,6 @@ type Resolvers struct {
 	rate      *rate.Limiter
 	detector  *resolver
 	timeout   time.Duration
-	options   *ThresholdOptions
 }
 
 type resolver struct {
@@ -43,7 +42,6 @@ type resolver struct {
 	xchgs   *xchgMgr
 	address *net.UDPAddr
 	rate    *rateTrack
-	stats   *stats
 }
 
 func (r *Resolvers) initResolver(addr string) *resolver {
@@ -61,7 +59,6 @@ func (r *Resolvers) initResolver(addr string) *resolver {
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
 			rate:    newRateTrack(),
-			stats:   new(stats),
 		}
 		go res.processRequests()
 	}
@@ -95,7 +92,6 @@ func NewResolvers() *Resolvers {
 		resps:     responses,
 		rate:      rate.NewLimiter(rate.Inf, 1),
 		timeout:   DefaultTimeout,
-		options:   new(ThresholdOptions),
 	}
 
 	r.pool = newAuthNSSelector(r)
@@ -106,7 +102,6 @@ func NewResolvers() *Resolvers {
 
 	go r.timeouts()
 	go r.enforceMaxQPS()
-	go r.thresholdChecks()
 	go r.processResponses()
 	go r.updateRateLimiters()
 	return r
@@ -315,8 +310,6 @@ func (r *Resolvers) processSingleResp(response *resp) {
 			go req.Res.tcpExchange(req)
 		} else {
 			req.Result <- req.Resp
-			req.Res.collectStats(req.Resp)
-
 			delta := req.RecvAt.Sub(req.SentAt)
 			req.Res.rate.ReportResponseTime(delta)
 			req.release()
@@ -379,7 +372,6 @@ func (r *Resolvers) timeouts() {
 			default:
 				for _, req := range res.xchgs.removeExpired() {
 					req.errNoResponse()
-					res.collectStats(req.Msg)
 					req.release()
 				}
 			}
@@ -428,7 +420,6 @@ func (r *resolver) tcpExchange(req *request) {
 
 	if m, _, err := client.Exchange(req.Msg, r.address.String()); err == nil {
 		req.Result <- m
-		r.collectStats(m)
 	} else {
 		req.errNoResponse()
 	}
