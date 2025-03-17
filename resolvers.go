@@ -38,7 +38,6 @@ type Resolvers struct {
 type resolver struct {
 	done    chan struct{}
 	pool    *Resolvers
-	queue   queue.Queue
 	xchgs   *xchgMgr
 	address *net.UDPAddr
 	rate    *rateTrack
@@ -55,12 +54,10 @@ func (r *Resolvers) initResolver(addr string) *resolver {
 		res = &resolver{
 			done:    make(chan struct{}, 1),
 			pool:    r,
-			queue:   queue.NewQueue(),
 			xchgs:   newXchgMgr(r.timeout),
 			address: uaddr,
 			rate:    newRateTrack(),
 		}
-		go res.processRequests()
 	}
 	return res
 }
@@ -237,32 +234,21 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 }
 
 func (r *Resolvers) enforceMaxQPS() {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
 loop:
 	for {
 		select {
 		case <-r.done:
 			break loop
+		case <-t.C:
 		case <-r.queue.Signal():
-			element, found := r.queue.Next()
-			if !found {
-				continue loop
-			}
+		}
 
-			_ = r.rate.Wait(context.TODO())
+		if element, found := r.queue.Next(); found {
 			if req, ok := element.(*request); ok {
-				name := req.Msg.Question[0].Name
-
-				r.Lock()
-				res := r.pool.GetResolver(name)
-				r.Unlock()
-
-				if res != nil {
-					req.Res = res
-					res.queue.Append(req)
-				} else {
-					req.errNoResponse()
-					req.release()
-				}
+				_ = r.rate.Wait(context.TODO())
+				go r.processSingleReq(req)
 			}
 		}
 	}
@@ -275,11 +261,32 @@ loop:
 	})
 }
 
+func (r *Resolvers) processSingleReq(req *request) {
+	name := req.Msg.Question[0].Name
+
+	r.Lock()
+	res := r.pool.GetResolver(name)
+	r.Unlock()
+
+	if res != nil {
+		req.Res = res
+		res.sendRequest(req)
+		return
+	}
+
+	req.errNoResponse()
+	req.release()
+}
+
 func (r *Resolvers) processResponses() {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
 	for {
 		select {
 		case <-r.done:
 			return
+		case <-t.C:
 		case <-r.resps.Signal():
 		}
 
@@ -351,7 +358,7 @@ func (r *Resolvers) timeouts() {
 	d := r.timeout
 	r.Unlock()
 
-	t := time.NewTicker(d)
+	t := time.NewTimer(d)
 	defer t.Stop()
 
 	for range t.C {
@@ -376,24 +383,22 @@ func (r *Resolvers) timeouts() {
 				}
 			}
 		}
+
+		t.Reset(d)
 	}
 }
 
-func (r *resolver) processRequests() {
-	for {
-		select {
-		case <-r.done:
-			return
-		case <-r.queue.Signal():
-		}
-
-		r.queue.Process(func(element interface{}) {
-			if req, ok := element.(*request); ok && req != nil {
-				r.rate.Take()
-				r.writeReq(req)
-			}
-		})
+func (r *resolver) sendRequest(req *request) {
+	select {
+	case <-r.done:
+		req.errNoResponse()
+		req.release()
+		return
+	default:
 	}
+
+	r.rate.Take()
+	r.writeReq(req)
 }
 
 func (r *resolver) writeReq(req *request) {

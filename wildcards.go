@@ -235,7 +235,7 @@ loop:
 			Msg:    QueryMsg(name, qtype),
 			Result: ch,
 		}
-		detector.queue.Append(req)
+		detector.sendRequest(req)
 
 		select {
 		case <-ctx.Done():
