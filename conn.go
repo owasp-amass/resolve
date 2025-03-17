@@ -83,7 +83,9 @@ func (r *connections) rotate() {
 	r.Lock()
 	defer r.Unlock()
 
-	old := r.conns
+	old := make([]*connection, len(r.conns))
+	copy(old, r.conns)
+
 	r.conns = []*connection{}
 	for i := 0; i < r.cpus; i++ {
 		_ = r.Add()
