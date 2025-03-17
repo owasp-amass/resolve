@@ -320,9 +320,6 @@ func (r *authNSSelector) populateFromLabel(last, fqdn string, resolvers []*resol
 						result.res = fres
 					} else if nres := r.serverNameToResolverObj(server, res); nres != nil {
 						result.res = nres
-						r.list = append(r.list, nres)
-						r.lookup[nres.address.IP.String()] = nres
-						r.serverToResolver[server] = nres
 					}
 
 					results <- result

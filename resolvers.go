@@ -120,18 +120,16 @@ func (r *Resolvers) SetLogger(l *log.Logger) {
 // SetTimeout updates the amount of time this pool will wait for response messages.
 func (r *Resolvers) SetTimeout(d time.Duration) {
 	r.Lock()
-	defer r.Unlock()
-
 	r.timeout = d
+	r.Unlock()
+
 	r.updateResolverTimeouts()
 }
 
 func (r *Resolvers) updateResolverTimeouts() {
+	r.Lock()
 	all := r.pool.AllResolvers()
-
-	if r.detector != nil {
-		all = append(all, r.detector)
-	}
+	r.Unlock()
 
 	for _, res := range all {
 		select {
@@ -144,6 +142,9 @@ func (r *Resolvers) updateResolverTimeouts() {
 
 // SetMaxQPS allows a preferred maximum number of queries per second to be specified for the pool.
 func (r *Resolvers) SetMaxQPS(qps int) {
+	r.Lock()
+	defer r.Unlock()
+
 	if qps > 0 {
 		r.qps = qps
 		r.rate.SetLimit(rate.Limit(qps))
@@ -256,7 +257,11 @@ loop:
 			if req, ok := element.(*request); ok {
 				name := req.Msg.Question[0].Name
 
-				if res := r.pool.GetResolver(name); res != nil {
+				r.Lock()
+				res := r.pool.GetResolver(name)
+				r.Unlock()
+
+				if res != nil {
 					req.Res = res
 					res.queue.Append(req)
 				} else {
@@ -294,7 +299,10 @@ func (r *Resolvers) processResponses() {
 func (r *Resolvers) processSingleResp(response *resp) {
 	addr, _, _ := net.SplitHostPort(response.Addr.String())
 
+	r.Lock()
 	res := r.pool.LookupResolver(addr)
+	r.Unlock()
+
 	if res == nil {
 		return
 	}
@@ -332,7 +340,9 @@ func (r *Resolvers) updateRateLimiters() {
 }
 
 func (r *Resolvers) updateAllRateLimiters() {
+	r.Lock()
 	all := r.pool.AllResolvers()
+	r.Unlock()
 
 	for _, res := range all {
 		select {
@@ -358,7 +368,11 @@ func (r *Resolvers) timeouts() {
 		default:
 		}
 
-		for _, res := range r.pool.AllResolvers() {
+		r.Lock()
+		all := r.pool.AllResolvers()
+		r.Unlock()
+
+		for _, res := range all {
 			select {
 			case <-r.done:
 				return
