@@ -30,7 +30,7 @@ func initResolverPool(addrstr string) (*Resolvers, Selector, *ConnPool) {
 	return NewResolvers(0, timeout, sel, conns), sel, conns
 }
 
-func TestInitializeResolver(t *testing.T) {
+func TestNewResolver(t *testing.T) {
 	timeout := 50 * time.Millisecond
 
 	if res := NewResolver("192.168.1.1", timeout); res == nil ||
