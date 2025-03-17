@@ -58,22 +58,28 @@ func (r *rateTrack) ReportRTT(rtt time.Duration) {
 	average = ((average * (count - 1)) + float64(rtt.Milliseconds())) / count
 	r.avg = time.Duration(math.Round(average)) * time.Millisecond
 	first := r.first
+
+	var update bool
+	if first {
+		update = true
+		r.first = false
+		r.updateTime = time.Now()
+	} else if r.count >= minUpdateSampleSize && time.Since(r.updateTime) >= rateUpdateInterval {
+		update = true
+		r.updateTime = time.Now()
+	}
 	r.Unlock()
 
-	if first {
-		r.update()
-		r.first = false
-	} else if r.count >= minUpdateSampleSize && time.Since(r.updateTime) >= rateUpdateInterval {
+	if update {
 		r.update()
 	}
 }
 
-func (rt *rateTrack) update() {
-	rt.Lock()
-	defer rt.Unlock()
+func (r *rateTrack) update() {
+	r.Lock()
+	defer r.Unlock()
 	// update the QPS rate limiter and reset counters
-	rt.limiter.SetLimit(rate.Every(rt.avg))
-	rt.avg = 0
-	rt.count = 0
-	rt.updateTime = time.Now()
+	r.limiter.SetLimit(rate.Every(r.avg))
+	r.avg = 0
+	r.count = 0
 }
