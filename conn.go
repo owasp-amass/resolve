@@ -46,7 +46,6 @@ func NewConnPool(cpus int, sel Selector) *ConnPool {
 	for i := 0; i < cpus; i++ {
 		_ = conns.Add()
 	}
-
 	return conns
 }
 
@@ -148,6 +147,8 @@ func (r *ConnPool) processResponse(response *resp) {
 	name := msg.Question[0].Name
 	if req := res.xchgs.remove(msg.Id, name); req != nil {
 		req.Resp = msg
+		req.RecvAt = response.At
+
 		if req.Resp.Truncated {
 			req.Res.tcpExchange(req)
 		} else {

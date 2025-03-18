@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caffix/queue"
 	"github.com/miekg/dns"
 	"golang.org/x/time/rate"
 )
@@ -26,7 +25,6 @@ type Resolvers struct {
 	conns     *ConnPool
 	pool      Selector
 	wildcards map[string]*wildcard
-	queue     queue.Queue
 	rate      *rate.Limiter
 	detector  *resolver
 	timeout   time.Duration
@@ -89,36 +87,12 @@ func NewResolvers(qps int, timeout time.Duration, sel Selector, conns *ConnPool)
 		conns:     conns,
 		pool:      sel,
 		wildcards: make(map[string]*wildcard),
-		queue:     queue.NewQueue(),
 		rate:      rate.NewLimiter(limit, 1),
 		timeout:   timeout,
 	}
 
 	go r.timeouts()
-	go r.enforceMaxQPS()
 	return r
-}
-
-// AddResolvers initializes and adds new resolvers to the pool of resolvers.
-func (r *Resolvers) AddResolvers(addrs ...string) error {
-	if _, ok := r.pool.(*authNSSelector); ok {
-		return nil
-	}
-
-	for _, addr := range addrs {
-		if _, _, err := net.SplitHostPort(addr); err != nil {
-			// add the default port number to the IP address
-			addr = net.JoinHostPort(addr, "53")
-		}
-		// check that this address will not create a duplicate resolver
-		if res := r.pool.LookupResolver(addr); res != nil {
-			continue
-		}
-		if res := NewResolver(addr, r.timeout); res != nil {
-			r.pool.AddResolver(res)
-		}
-	}
-	return nil
 }
 
 // Stop will release resources for the resolver pool and all add resolvers.
@@ -145,7 +119,7 @@ func (r *Resolvers) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 		if req := reqPool.Get().(*request); req != nil {
 			req.Msg = msg
 			req.Result = ch
-			r.queue.Append(req)
+			go r.processSingleReq(req)
 			return
 		}
 	}
@@ -180,39 +154,12 @@ func (r *Resolvers) QueryBlocking(ctx context.Context, msg *dns.Msg) (*dns.Msg, 
 	return resp, err
 }
 
-func (r *Resolvers) enforceMaxQPS() {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-loop:
-	for {
-		select {
-		case <-r.done:
-			break loop
-		case <-t.C:
-		case <-r.queue.Signal():
-		}
-
-		if element, found := r.queue.Next(); found {
-			if req, ok := element.(*request); ok {
-				_ = r.rate.Wait(context.TODO())
-				go r.processSingleReq(req)
-			}
-		}
-	}
-	// release the requests remaining on the queue
-	r.queue.Process(func(element interface{}) {
-		if req, ok := element.(request); ok {
-			req.errNoResponse()
-			req.release()
-		}
-	})
-}
-
 func (r *Resolvers) processSingleReq(req *request) {
 	name := req.Msg.Question[0].Name
 
 	if res := r.pool.GetResolver(name); res != nil {
 		req.Res = res
+		_ = r.rate.Wait(context.TODO())
 		res.sendRequest(req, r.conns)
 		return
 	}

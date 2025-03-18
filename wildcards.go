@@ -74,9 +74,12 @@ func UnlikelyName(sub string) string {
 
 // WildcardDetected returns true when the provided DNS response could be a wildcard match.
 func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain string) bool {
+	if d := r.getDetectionResolver(); d == nil {
+		return false
+	}
+
 	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
 	domain = strings.ToLower(RemoveLastDot(domain))
-
 	if labels := strings.Split(name, "."); len(labels) > len(strings.Split(domain, ".")) {
 		name = strings.Join(labels[1:], ".")
 	}

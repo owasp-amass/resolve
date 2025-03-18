@@ -14,19 +14,16 @@ import (
 )
 
 const (
-	numIntervalSeconds  = 5
 	minUpdateSampleSize = 10
-	minInterval         = 500 * time.Millisecond
-	rateUpdateInterval  = numIntervalSeconds * time.Second
+	maxInterval         = time.Second
 )
 
 type rateTrack struct {
 	sync.Mutex
-	limiter    *rate.Limiter
-	avg        time.Duration
-	count      int
-	first      bool
-	updateTime time.Time
+	limiter *rate.Limiter
+	avg     time.Duration
+	count   int
+	first   bool
 }
 
 func newRateTrack() *rateTrack {
@@ -48,8 +45,8 @@ func (r *rateTrack) ReportRTT(rtt time.Duration) {
 	r.Lock()
 	defer r.Unlock()
 
-	if rtt > minInterval {
-		rtt = minInterval
+	if rtt > maxInterval {
+		rtt = maxInterval
 	}
 
 	r.count++
@@ -62,10 +59,8 @@ func (r *rateTrack) ReportRTT(rtt time.Duration) {
 	if first {
 		r.update()
 		r.first = false
-		r.updateTime = time.Now()
-	} else if r.count >= minUpdateSampleSize && time.Since(r.updateTime) >= rateUpdateInterval {
+	} else if r.count >= minUpdateSampleSize {
 		r.update()
-		r.updateTime = time.Now()
 	}
 }
 
