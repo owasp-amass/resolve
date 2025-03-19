@@ -11,50 +11,36 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve"
+	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
-var rootIPs = []string{
-	"198.41.0.4",
-	"199.9.14.201",
-	"192.33.4.12",
-	"199.7.91.13",
-	"192.203.230.10",
-	"192.5.5.241",
-	"192.112.36.4",
-	"198.97.190.53",
-	"192.36.148.17",
-	"192.58.128.30",
-	"193.0.14.129",
-	"199.7.83.42",
-	"202.12.27.33",
-}
-
-func NewAuthoritative(timeout time.Duration) *Authoritative {
-	auth := &Authoritative{
+func NewAuthoritative(timeout time.Duration) *authoritative {
+	auth := &authoritative{
 		timeout:       timeout,
-		lookup:        make(map[string]*resolve.Nameserver),
+		lookup:        make(map[string]types.Nameserver),
 		fqdnToServers: make(map[string][]string),
-		fqdnToNSs:     make(map[string][]*resolve.Nameserver),
-		serverToNSs:   make(map[string]*resolve.Nameserver),
+		fqdnToNSs:     make(map[string][]types.Nameserver),
+		serverToNSs:   make(map[string]types.Nameserver),
 	}
 
-	for _, addr := range rootIPs {
-		if ns := resolve.NewNameserver(addr, timeout); ns != nil {
-			auth.lookup[addr] = ns
-			auth.list = append(auth.list, ns)
-			auth.roots = append(auth.roots, ns)
-		}
+	for _, ns := range utils.RootServers(timeout) {
+		addr := ns.Address.IP.String()
+
+		auth.lookup[addr] = ns
+		auth.list = append(auth.list, ns)
+		auth.roots = append(auth.roots, ns)
 	}
 	return auth
 }
 
 // Get performs selection of the correct nameserver in the pool.
-func (r *Authoritative) Get(fqdn string) *resolve.Nameserver {
+func (r *authoritative) Get(fqdn string) types.Nameserver {
 	r.Lock()
 	defer r.Unlock()
 
-	name := strings.ToLower(resolve.RemoveLastDot(fqdn))
+	name := strings.ToLower(utils.RemoveLastDot(fqdn))
 	if ns := r.checkFQDNAndMinusOne(name); ns != nil {
 		return ns
 	}
@@ -66,7 +52,7 @@ func (r *Authoritative) Get(fqdn string) *resolve.Nameserver {
 	return nil
 }
 
-func (r *Authoritative) checkFQDNAndMinusOne(fqdn string) *resolve.Nameserver {
+func (r *authoritative) checkFQDNAndMinusOne(fqdn string) types.Nameserver {
 	if servers, found := r.fqdnToNSs[fqdn]; found {
 		return pickOneServer(servers)
 	}
@@ -82,29 +68,29 @@ func (r *Authoritative) checkFQDNAndMinusOne(fqdn string) *resolve.Nameserver {
 	return nil
 }
 
-func (r *Authoritative) Lookup(addr string) *resolve.Nameserver {
+func (r *authoritative) Lookup(addr string) types.Nameserver {
 	r.Lock()
 	defer r.Unlock()
 
 	return r.lookup[addr]
 }
 
-func (r *Authoritative) Add(ns *resolve.Nameserver) {
+func (r *authoritative) Add(ns types.Nameserver) {
 	r.Lock()
 	defer r.Unlock()
 
-	addrstr := ns.Address.IP.String()
+	addrstr := ns.Address().IP.String()
 	if _, found := r.lookup[addrstr]; !found {
 		r.list = append(r.list, ns)
 		r.lookup[addrstr] = ns
 	}
 }
 
-func (r *Authoritative) Remove(ns *resolve.Nameserver) {
+func (r *authoritative) Remove(ns types.Nameserver) {
 	r.Lock()
 	defer r.Unlock()
 
-	addrstr := ns.Address.IP.String()
+	addrstr := ns.Address().IP.String()
 	if _, found := r.lookup[addrstr]; found {
 		delete(r.lookup, addrstr)
 
@@ -117,18 +103,18 @@ func (r *Authoritative) Remove(ns *resolve.Nameserver) {
 	}
 }
 
-func (r *Authoritative) All() []*resolve.Nameserver {
+func (r *authoritative) All() []types.Nameserver {
 	r.Lock()
 	defer r.Unlock()
 
-	all := make([]*resolve.Nameserver, 0, len(r.list))
+	all := make([]types.Nameserver, 0, len(r.list))
 	_ = copy(all, r.list)
 	return all
 }
 
-func (r *Authoritative) Close() {
+func (r *authoritative) Close() {
 	r.Lock()
-	all := make([]*resolve.Nameserver, 0, len(r.list))
+	all := make([]types.Nameserver, 0, len(r.list))
 	_ = copy(all, r.list)
 	r.Unlock()
 
@@ -143,7 +129,7 @@ func (r *Authoritative) Close() {
 	r.serverToNSs = nil
 }
 
-func (r *Authoritative) populateAuthServers(fqdn string) {
+func (r *authoritative) populateAuthServers(fqdn string) {
 	labels := strings.Split(fqdn, ".")
 	last, resolvers := r.findClosestResolverSet(fqdn, labels[len(labels)-1])
 
@@ -154,9 +140,9 @@ func (r *Authoritative) populateAuthServers(fqdn string) {
 	r.populateFromLabel(last, fqdn, resolvers)
 }
 
-func (r *Authoritative) populateFromLabel(last, fqdn string, servers []*resolve.Nameserver) {
-	resolve.RegisteredToFQDN(last, fqdn, func(name string) bool {
-		ns := pickOneServer(servers)
+func (r *authoritative) populateFromLabel(last, fqdn string, nsers []types.Nameserver) {
+	utils.RegisteredToFQDN(last, fqdn, func(name string) bool {
+		ns := pickOneServer(nsers)
 
 		servs, found := r.fqdnToServers[name]
 		if !found {
@@ -166,16 +152,16 @@ func (r *Authoritative) populateFromLabel(last, fqdn string, servers []*resolve.
 
 		var updated bool
 		if len(servs) > 0 {
-			var servset []*resolve.Nameserver
+			var servset []types.Nameserver
 			type servres struct {
 				server string
-				ns     *resolve.Nameserver
+				ns     types.Nameserver
 			}
 			results := make(chan *servres, len(servs))
 			defer close(results)
 
 			for _, server := range servs {
-				go func(n string, ns *resolve.Nameserver) {
+				go func(n string, ns types.Nameserver) {
 					result := &servres{server: n, ns: nil}
 
 					if fres, found := r.serverToNSs[n]; found {
@@ -195,7 +181,7 @@ func (r *Authoritative) populateFromLabel(last, fqdn string, servers []*resolve.
 				}
 
 				servset = append(servset, result.ns)
-				addrstr := result.ns.Address.IP.String()
+				addrstr := result.ns.Address().IP.String()
 				if _, found := r.lookup[addrstr]; !found {
 					r.list = append(r.list, result.ns)
 					r.lookup[addrstr] = result.ns
@@ -205,23 +191,23 @@ func (r *Authoritative) populateFromLabel(last, fqdn string, servers []*resolve.
 
 			if len(servset) > 0 {
 				updated = true
-				servers = servset
+				nsers = servset
 			}
 		}
 
 		if name != fqdn || updated {
-			r.fqdnToNSs[name] = servers
+			r.fqdnToNSs[name] = nsers
 		}
 		return false
 	})
 }
 
-func (r *Authoritative) findClosestResolverSet(fqdn, tld string) (string, []*resolve.Nameserver) {
+func (r *authoritative) findClosestResolverSet(fqdn, tld string) (string, []types.Nameserver) {
 	last := fqdn
-	resolvers := make([]*resolve.Nameserver, len(r.roots))
+	resolvers := make([]types.Nameserver, len(r.roots))
 	_ = copy(resolvers, r.roots)
 
-	resolve.FQDNToRegistered(fqdn, tld, func(name string) bool {
+	utils.FQDNToRegistered(fqdn, tld, func(name string) bool {
 		if res, found := r.fqdnToNSs[name]; found {
 			resolvers = res
 			return true
@@ -233,21 +219,21 @@ func (r *Authoritative) findClosestResolverSet(fqdn, tld string) (string, []*res
 	return last, resolvers
 }
 
-func (r *Authoritative) serverNameToResolverObj(server string, ns *resolve.Nameserver) *resolve.Nameserver {
-	addr := ns.Address.IP.String() + ":53"
+func (r *authoritative) serverNameToResolverObj(server string, ns types.Nameserver) types.Nameserver {
+	addr := ns.Address().IP.String() + ":53"
 	client := dns.Client{
 		Net:     "udp",
 		Timeout: time.Second,
 	}
 
 	for i := 0; i < 10; i++ {
-		msg := resolve.QueryMsg(server, dns.TypeA)
+		msg := utils.QueryMsg(server, dns.TypeA)
 
 		if m, _, err := client.Exchange(msg, addr); err == nil && m != nil && m.Rcode == dns.RcodeSuccess {
-			for _, rr := range resolve.AnswersByType(m, dns.TypeA) {
+			for _, rr := range utils.AnswersByType(m, dns.TypeA) {
 				if record, ok := rr.(*dns.A); ok {
 					ip := net.JoinHostPort(record.A.String(), "53")
-					return resolve.NewNameserver(ip, r.timeout)
+					return servers.NewNameserver(ip, r.timeout)
 				}
 			}
 			break
@@ -256,8 +242,8 @@ func (r *Authoritative) serverNameToResolverObj(server string, ns *resolve.Names
 	return nil
 }
 
-func (r *Authoritative) getNameServers(fqdn string, ns *resolve.Nameserver) []string {
-	addr := ns.Address.IP.String() + ":53"
+func (r *authoritative) getNameServers(fqdn string, ns types.Nameserver) []string {
+	addr := ns.Address().IP.String() + ":53"
 	client := dns.Client{
 		Net:     "udp",
 		Timeout: time.Second,
@@ -265,12 +251,12 @@ func (r *Authoritative) getNameServers(fqdn string, ns *resolve.Nameserver) []st
 
 	var servers []string
 	for i := 0; i < 10; i++ {
-		msg := resolve.QueryMsg(fqdn, dns.TypeNS)
+		msg := utils.QueryMsg(fqdn, dns.TypeNS)
 
 		if m, _, err := client.Exchange(msg, addr); err == nil && m != nil && m.Rcode == dns.RcodeSuccess {
-			for _, rr := range resolve.AnswersByType(m, dns.TypeNS) {
+			for _, rr := range utils.AnswersByType(m, dns.TypeNS) {
 				if record, ok := rr.(*dns.NS); ok {
-					servers = append(servers, strings.ToLower(resolve.RemoveLastDot(record.Ns)))
+					servers = append(servers, strings.ToLower(utils.RemoveLastDot(record.Ns)))
 				}
 			}
 			break
@@ -279,7 +265,7 @@ func (r *Authoritative) getNameServers(fqdn string, ns *resolve.Nameserver) []st
 	return servers
 }
 
-func pickOneServer(servers []*resolve.Nameserver) *resolve.Nameserver {
+func pickOneServer(servers []types.Nameserver) types.Nameserver {
 	if l := len(servers); l > 0 {
 		return servers[rand.Intn(l)]
 	}

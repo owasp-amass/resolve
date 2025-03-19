@@ -2,14 +2,16 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package servers
 
 import (
-	"context"
 	"testing"
+	"time"
 
 	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/selectors"
 )
 
 var nsecLinkedList []string = []string{
@@ -115,13 +117,16 @@ func TestNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r, sel, conns := initResolverPool(addrstr)
-	defer r.Stop()
+	timeout := 50 * time.Millisecond
+	sel := selectors.NewRandom()
+	serv := NewNameserver(addrstr, timeout)
+	sel.Add(serv)
+	conns := conn.New(1, sel)
+	defer serv.Close()
 	defer sel.Close()
 	defer conns.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	names, err := r.NsecTraversal(ctx, "walk.com")
+	names, err := serv.NsecTraversal("walk.com", conns)
 	if err != nil {
 		t.Errorf("The NSEC traversal was not successful: %v", err)
 	}
@@ -140,16 +145,6 @@ func TestNsecTraversal(t *testing.T) {
 	if nsecSet.Len() != 0 {
 		t.Errorf("The NSEC traversal found %d names and failed to discover the following names: %v", set.Len(), nsecSet.Slice())
 	}
-
-	cancel()
-	if _, err := r.NsecTraversal(ctx, "walk.com"); err == nil {
-		t.Errorf("The NSEC traversal failed to return an error with an expired context")
-	}
-
-	r.Stop()
-	if _, err := r.NsecTraversal(context.Background(), "walk.com"); err == nil {
-		t.Errorf("The NSEC traversal failed to return an error with a stopped resolver pool")
-	}
 }
 
 func TestBadNsecTraversal(t *testing.T) {
@@ -163,12 +158,16 @@ func TestBadNsecTraversal(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r, sel, conns := initResolverPool(addrstr)
-	defer r.Stop()
+	timeout := 50 * time.Millisecond
+	sel := selectors.NewRandom()
+	serv := NewNameserver(addrstr, timeout)
+	sel.Add(serv)
+	conns := conn.New(1, sel)
+	defer serv.Close()
 	defer sel.Close()
 	defer conns.Close()
 
-	if _, err := r.NsecTraversal(context.Background(), "walk.com"); err == nil {
+	if _, err := serv.NsecTraversal("walk.com", conns); err == nil {
 		t.Errorf("The NSEC traversal failed to return an error when the NSEC record was absent")
 	}
 }

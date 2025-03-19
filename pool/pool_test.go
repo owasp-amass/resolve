@@ -2,30 +2,37 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package pool
 
 import (
 	"context"
+	"io"
+	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/conn"
 	"github.com/owasp-amass/resolve/selectors"
+	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
-func initPool(addrstr string) (*Pool, selectors.Selector, *ConnPool) {
-	var sel selectors.Selector
+func initPool(addrstr string) (*Pool, types.Selector, types.Conn) {
+	var sel types.Selector
 	timeout := 50 * time.Millisecond
 
 	if addrstr == "" {
 		sel = selectors.NewAuthoritative(timeout)
 	} else {
 		sel = selectors.NewRandom()
-		sel.Add(NewNameserver(addrstr, timeout))
+		sel.Add(servers.NewNameserver(addrstr, timeout))
 	}
 
-	conns := NewConnPool(1, sel)
-	return NewPool(0, timeout, sel, conns), sel, conns
+	conns := conn.New(1, sel)
+	return New(0, sel, conns, nil), sel, conns
 }
 
 func TestPoolQuery(t *testing.T) {
@@ -49,12 +56,12 @@ func TestPoolQuery(t *testing.T) {
 	defer close(ch)
 
 	for i := 0; i < num; i++ {
-		p.Query(context.Background(), QueryMsg("pool.net", dns.TypeA), ch)
+		p.Query(context.Background(), utils.QueryMsg("pool.net", dns.TypeA), ch)
 	}
 	for i := 0; i < num; i++ {
 		if m := <-ch; m == nil || len(m.Answer) == 0 {
 			failures++
-		} else if rrs := AnswersByType(m, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
+		} else if rrs := utils.AnswersByType(m, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
 			failures++
 		}
 	}
@@ -111,9 +118,9 @@ func TestQuery(t *testing.T) {
 
 	var success bool
 	for i := 0; i < 5; i++ {
-		p.Query(context.Background(), QueryMsg("caffix.net", dns.TypeA), ch)
+		p.Query(context.Background(), utils.QueryMsg("caffix.net", dns.TypeA), ch)
 		if m := <-ch; m != nil && len(m.Answer) > 0 {
-			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+			if rrs := utils.AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 				success = true
 				break
 			}
@@ -141,12 +148,12 @@ func TestQueryChan(t *testing.T) {
 
 	var success bool
 	for i := 0; i < 5; i++ {
-		ch := p.QueryChan(context.Background(), QueryMsg("caffix.net", dns.TypeA))
+		ch := p.QueryChan(context.Background(), utils.QueryMsg("caffix.net", dns.TypeA))
 		m := <-ch
 		close(ch)
 
 		if m != nil && len(m.Answer) > 0 {
-			if rrs := AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+			if rrs := utils.AnswersByType(m, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 				success = true
 				break
 			}
@@ -176,9 +183,9 @@ func TestExchange(t *testing.T) {
 	var success bool
 	ctx, cancel := context.WithCancel(context.Background())
 	for i := 0; i < 5; i++ {
-		if resp, err := p.Exchange(ctx, QueryMsg(name, dns.TypeA)); err == nil && resp != nil {
+		if resp, err := p.Exchange(ctx, utils.QueryMsg(name, dns.TypeA)); err == nil && resp != nil {
 			if len(resp.Answer) > 0 {
-				if rrs := AnswersByType(resp, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
+				if rrs := utils.AnswersByType(resp, dns.TypeA); len(rrs) > 0 && (rrs[0].(*dns.A)).A.String() == "192.168.1.1" {
 					success = true
 					break
 				}
@@ -191,7 +198,7 @@ func TestExchange(t *testing.T) {
 
 	cancel()
 	// The query should fail since the context has expired
-	_, err = p.Exchange(ctx, QueryMsg(name, dns.TypeA))
+	_, err = p.Exchange(ctx, utils.QueryMsg(name, dns.TypeA))
 	if err == nil {
 		t.Errorf("the query did not fail as expected")
 	}
@@ -213,12 +220,12 @@ func TestEdgeCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
-	if _, err := p.Exchange(ctx, QueryMsg("google.com", dns.TypeA)); err == nil {
+	if _, err := p.Exchange(ctx, utils.QueryMsg("google.com", dns.TypeA)); err == nil {
 		t.Errorf("query was successful when provided an expired context")
 	}
 
 	p.Stop()
-	if resp, err := p.Exchange(context.Background(), QueryMsg("google.com", dns.TypeA)); err == nil && len(resp.Answer) > 0 {
+	if resp, err := p.Exchange(context.Background(), utils.QueryMsg("google.com", dns.TypeA)); err == nil && len(resp.Answer) > 0 {
 		t.Errorf("query was successful when provided a stopped Resolver")
 	}
 }
@@ -239,8 +246,8 @@ func TestBadWriteNextMsg(t *testing.T) {
 	defer sel.Close()
 	conns.Close()
 
-	resp, err := p.Exchange(context.Background(), QueryMsg(name, dns.TypeA))
-	if err == nil && resp.Rcode != RcodeNoResponse {
+	resp, err := p.Exchange(context.Background(), utils.QueryMsg(name, dns.TypeA))
+	if err == nil && resp.Rcode != servers.RcodeNoResponse {
 		t.Errorf("the query did not fail as expected")
 	}
 }
@@ -262,5 +269,90 @@ func TestTruncatedMsgs(t *testing.T) {
 	defer conns.Close()
 
 	// Perform the query to call the TCP exchange
-	_, _ = p.Exchange(context.Background(), QueryMsg(name, 1))
+	_, _ = p.Exchange(context.Background(), utils.QueryMsg(name, 1))
+}
+
+func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
+	m := new(dns.Msg)
+	m.SetReply(req)
+
+	m.Answer = make([]dns.RR, 1)
+	m.Answer[0] = &dns.A{
+		Hdr: dns.RR_Header{
+			Name:   m.Question[0].Name,
+			Rrtype: dns.TypeA,
+			Class:  dns.ClassINET,
+			Ttl:    0,
+		},
+		A: net.ParseIP("192.168.1.1"),
+	}
+	_ = w.WriteMsg(m)
+}
+
+func truncatedHandler(w dns.ResponseWriter, req *dns.Msg) {
+	m := new(dns.Msg)
+	m.SetReply(req)
+
+	m.Truncated = true
+	m.Answer = make([]dns.RR, 1)
+	m.Answer[0] = &dns.A{
+		Hdr: dns.RR_Header{
+			Name:   m.Question[0].Name,
+			Rrtype: dns.TypeA,
+			Class:  dns.ClassINET,
+			Ttl:    0,
+		},
+		A: net.ParseIP("192.168.1.1"),
+	}
+	_ = w.WriteMsg(m)
+}
+
+func RunLocalUDPServer(laddr string, opts ...func(*dns.Server)) (*dns.Server, string, chan error, error) {
+	pc, err := net.ListenPacket("udp", laddr)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return RunLocalServer(pc, nil, opts...)
+}
+
+func RunLocalServer(pc net.PacketConn, l net.Listener, opts ...func(*dns.Server)) (*dns.Server, string, chan error, error) {
+	server := &dns.Server{
+		PacketConn: pc,
+		Listener:   l,
+
+		ReadTimeout:  time.Hour,
+		WriteTimeout: time.Hour,
+	}
+
+	waitLock := sync.Mutex{}
+	waitLock.Lock()
+	server.NotifyStartedFunc = waitLock.Unlock
+
+	for _, opt := range opts {
+		opt(server)
+	}
+
+	var (
+		addr   string
+		closer io.Closer
+	)
+	if l != nil {
+		addr = l.Addr().String()
+		closer = l
+	} else {
+		addr = pc.LocalAddr().String()
+		closer = pc
+	}
+	// fin must be buffered so the goroutine below won't block
+	// forever if fin is never read from. This always happens
+	// if the channel is discarded and can happen in TestShutdownUDP.
+	fin := make(chan error, 1)
+
+	go func() {
+		fin <- server.ActivateAndServe()
+		closer.Close()
+	}()
+
+	waitLock.Lock()
+	return server, addr, fin, nil
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package pool
 
 import (
 	"context"
@@ -10,48 +10,42 @@ import (
 	"io"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/selectors"
+	"github.com/owasp-amass/resolve/servers"
 	"golang.org/x/time/rate"
 )
 
 // Pool is a managed pool of DNS nameservers.
 type Pool struct {
 	sync.Mutex
-	done      chan struct{}
-	log       *log.Logger
-	conns     *ConnPool
-	pool      Selector
-	wildcards map[string]*wildcard
-	rate      *rate.Limiter
-	detector  *Nameserver
-	timeout   time.Duration
+	done     chan struct{}
+	log      *log.Logger
+	Conns    *conn.Conn
+	Selector selectors.Selector
+	rate     *rate.Limiter
 }
 
-// NewPool initializes a DNS nameserver pool.
-func NewPool(qps int, timeout time.Duration, sel Selector, conns *ConnPool) *Pool {
+// New initializes a DNS nameserver pool.
+func New(qps int, sel selectors.Selector, conns *conn.Conn, logger *log.Logger) *Pool {
 	limit := rate.Inf
 	if qps > 0 {
 		limit = rate.Limit(qps)
 	}
 
-	if timeout <= 0 {
-		timeout = DefaultTimeout
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
 	}
 
-	p := &Pool{
-		done:      make(chan struct{}, 1),
-		log:       log.New(io.Discard, "", 0),
-		conns:     conns,
-		pool:      sel,
-		wildcards: make(map[string]*wildcard),
-		rate:      rate.NewLimiter(limit, 1),
-		timeout:   timeout,
+	return &Pool{
+		done:     make(chan struct{}, 1),
+		log:      logger,
+		Conns:    conns,
+		Selector: sel,
+		rate:     rate.NewLimiter(limit, 1),
 	}
-
-	go p.timeouts()
-	return p
 }
 
 // Stop will release resources use by the pool.
@@ -75,7 +69,7 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		if req := reqPool.Get().(*request); req != nil {
+		if req := servers.RequestPool.Get().(*servers.Request); req != nil {
 			req.Msg = msg
 			req.Result = ch
 			go r.processSingleReq(req)
@@ -83,7 +77,7 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 		}
 	}
 
-	msg.Rcode = RcodeNoResponse
+	msg.Rcode = servers.RcodeNoResponse
 	ch <- msg
 }
 
@@ -114,43 +108,16 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 	return resp, err
 }
 
-func (r *Pool) processSingleReq(req *request) {
+func (r *Pool) processSingleReq(req *servers.Request) {
 	name := req.Msg.Question[0].Name
 
-	if res := r.pool.GetResolver(name); res != nil {
-		req.Res = res
+	if serv := r.Selector.Get(name); serv != nil {
+		req.Server = serv
 		_ = r.rate.Wait(context.TODO())
-		res.sendRequest(req, r.conns)
+		serv.sendRequest(req, r.Conns)
 		return
 	}
 
-	req.errNoResponse()
-	req.release()
-}
-
-func (r *Pool) timeouts() {
-	t := time.NewTimer(r.timeout)
-	defer t.Stop()
-
-	for range t.C {
-		select {
-		case <-r.done:
-			return
-		default:
-		}
-
-		for _, res := range r.pool.AllResolvers() {
-			select {
-			case <-r.done:
-				return
-			default:
-				for _, req := range res.xchgs.removeExpired() {
-					req.errNoResponse()
-					req.release()
-				}
-			}
-		}
-
-		t.Reset(r.timeout)
-	}
+	req.ErrNoResponse()
+	req.Release()
 }

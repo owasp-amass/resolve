@@ -8,42 +8,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/owasp-amass/resolve"
+	"github.com/owasp-amass/resolve/types"
 )
 
-type Selector interface {
-	// Get returns a nameserverr managed by the selector.
-	Get(fqdn string) *resolve.Nameserver
-
-	// Lookup returns the nameserver with the matching address.
-	Lookup(addr string) *resolve.Nameserver
-
-	// Add adds a nameserver to the selector pool.
-	Add(ns *resolve.Nameserver)
-
-	// Remove removes a nameserver from the selector pool.
-	Remove(ns *resolve.Nameserver)
-
-	// All returns all the nameservers currently managed by the selector.
-	All() []*resolve.Nameserver
-
-	// Close releases all resources allocated by the selector.
-	Close()
-}
-
-type Random struct {
+type random struct {
 	sync.Mutex
-	list   []*resolve.Nameserver
-	lookup map[string]*resolve.Nameserver
+	list   []types.Nameserver
+	lookup map[string]types.Nameserver
 }
 
-type Authoritative struct {
+type authoritative struct {
 	sync.Mutex
 	timeout       time.Duration
-	list          []*resolve.Nameserver
-	lookup        map[string]*resolve.Nameserver
-	roots         []*resolve.Nameserver
+	list          []types.Nameserver
+	lookup        map[string]types.Nameserver
+	roots         []types.Nameserver
 	fqdnToServers map[string][]string
-	fqdnToNSs     map[string][]*resolve.Nameserver
-	serverToNSs   map[string]*resolve.Nameserver
+	fqdnToNSs     map[string][]types.Nameserver
+	serverToNSs   map[string]types.Nameserver
 }

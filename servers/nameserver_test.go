@@ -2,7 +2,7 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package servers
 
 import (
 	"context"
@@ -13,13 +13,33 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/pool"
+	"github.com/owasp-amass/resolve/selectors"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
+
+func initPool(addrstr string) (*pool.Pool, types.Selector, types.Conn) {
+	var sel types.Selector
+	timeout := 50 * time.Millisecond
+
+	if addrstr == "" {
+		sel = selectors.NewAuthoritative(timeout)
+	} else {
+		sel = selectors.NewRandom()
+		sel.Add(NewNameserver(addrstr, timeout))
+	}
+
+	conns := conn.New(1, sel)
+	return pool.New(0, sel, conns, nil), sel, conns
+}
 
 func TestNewResolver(t *testing.T) {
 	timeout := 50 * time.Millisecond
 
 	if res := NewNameserver("192.168.1.1", timeout); res == nil ||
-		res.address.IP.String() != "192.168.1.1" || res.address.Port != 53 {
+		res.Address().IP.String() != "192.168.1.1" || res.Address().Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
 	if res := NewNameserver("300.300.300.300", timeout); res != nil {
@@ -42,7 +62,7 @@ func TestQueryTimeout(t *testing.T) {
 	defer sel.Close()
 	defer conns.Close()
 
-	resp, err := p.Exchange(context.Background(), QueryMsg("timeout.org", dns.TypeA))
+	resp, err := p.Exchange(context.Background(), utils.QueryMsg("timeout.org", dns.TypeA))
 	if err == nil && len(resp.Answer) > 0 {
 		t.Errorf("the query did not fail as expected")
 	}
@@ -63,20 +83,20 @@ func TestTCPExchange(t *testing.T) {
 	defer p.Stop()
 	defer sel.Close()
 	defer conns.Close()
-	res := p.pool.GetResolver(name)
+	serv := p.Selector.Get(name)
 
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
-	msg := QueryMsg(name, dns.TypeA)
-	res.tcpExchange(&request{
-		Res:    res,
-		Msg:    msg,
-		Result: ch,
+	msg := utils.QueryMsg(name, dns.TypeA)
+	serv.tcpExchange(&request{
+		serv:   serv,
+		msg:    msg,
+		result: ch,
 	})
 
 	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
 		if len(resp.Answer) > 0 {
-			if rrs := AnswersByType(resp, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
+			if rrs := utils.AnswersByType(resp, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
 				t.Errorf("the query did not return the expected IP address")
 			}
 		}
@@ -100,15 +120,15 @@ func TestBadTCPExchange(t *testing.T) {
 	defer p.Stop()
 	defer sel.Close()
 	defer conns.Close()
-	res := p.pool.GetResolver(name)
+	serv := p.Selector.Get(name)
 
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
-	msg := QueryMsg(name, dns.TypeA)
-	res.tcpExchange(&request{
-		Res:    res,
-		Msg:    msg,
-		Result: ch,
+	msg := utils.QueryMsg(name, dns.TypeA)
+	serv.tcpExchange(&request{
+		serv:   serv,
+		msg:    msg,
+		result: ch,
 	})
 
 	if resp := <-ch; resp.Rcode != RcodeNoResponse {

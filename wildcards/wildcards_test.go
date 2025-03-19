@@ -2,28 +2,24 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package wildcards
 
 import (
 	"context"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/pool"
+	"github.com/owasp-amass/resolve/selectors"
+	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/utils"
 )
-
-func TestSetDetectionResolver(t *testing.T) {
-	r, sel, conns := initResolverPool("")
-	defer r.Stop()
-	defer sel.Close()
-	defer conns.Close()
-
-	r.SetDetectionResolver("8.8.8.8")
-	if r.detector == nil {
-		t.Errorf("failed to add the wildcard detector")
-	}
-}
 
 func TestWildcardDetected(t *testing.T) {
 	name := "domain.com."
@@ -36,8 +32,15 @@ func TestWildcardDetected(t *testing.T) {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	r, sel, conns := initResolverPool(addrstr)
-	defer r.Stop()
+	timeout := 50 * time.Millisecond
+	sel := selectors.NewRandom()
+	serv := servers.NewNameserver(addrstr, timeout)
+	sel.Add(serv)
+	conns := conn.New(1, sel.Lookup)
+	detector := NewDetector(serv, conns, nil)
+	p := pool.New(0, sel, conns, nil)
+	defer p.Stop()
+	defer serv.Stop()
 	defer sel.Close()
 	defer conns.Close()
 
@@ -63,14 +66,13 @@ func TestWildcardDetected(t *testing.T) {
 		},
 	}
 
-	r.SetDetectionResolver(addrstr)
 	for _, c := range cases {
-		resp, err := r.QueryBlocking(context.Background(), QueryMsg(c.input, 1))
+		resp, err := p.Exchange(context.Background(), utils.QueryMsg(c.input, 1))
 		if err != nil {
 			t.Errorf("The query for %s failed %v", c.input, err)
 			continue
 		}
-		if got := r.WildcardDetected(context.Background(), resp, "domain.com"); got != c.want {
+		if got := detector.WildcardDetected(context.Background(), resp, "domain.com"); got != c.want {
 			t.Errorf("Wildcard detection for %s returned %t instead of the expected %t", c.input, got, c.want)
 		}
 	}
@@ -106,4 +108,54 @@ func wildcardHandler(w dns.ResponseWriter, req *dns.Msg) {
 		A: net.ParseIP(addr),
 	}
 	_ = w.WriteMsg(m)
+}
+
+func RunLocalUDPServer(laddr string, opts ...func(*dns.Server)) (*dns.Server, string, chan error, error) {
+	pc, err := net.ListenPacket("udp", laddr)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return RunLocalServer(pc, nil, opts...)
+}
+
+func RunLocalServer(pc net.PacketConn, l net.Listener, opts ...func(*dns.Server)) (*dns.Server, string, chan error, error) {
+	server := &dns.Server{
+		PacketConn: pc,
+		Listener:   l,
+
+		ReadTimeout:  time.Hour,
+		WriteTimeout: time.Hour,
+	}
+
+	waitLock := sync.Mutex{}
+	waitLock.Lock()
+	server.NotifyStartedFunc = waitLock.Unlock
+
+	for _, opt := range opts {
+		opt(server)
+	}
+
+	var (
+		addr   string
+		closer io.Closer
+	)
+	if l != nil {
+		addr = l.Addr().String()
+		closer = l
+	} else {
+		addr = pc.LocalAddr().String()
+		closer = pc
+	}
+	// fin must be buffered so the goroutine below won't block
+	// forever if fin is never read from. This always happens
+	// if the channel is discarded and can happen in TestShutdownUDP.
+	fin := make(chan error, 1)
+
+	go func() {
+		fin <- server.ActivateAndServe()
+		closer.Close()
+	}()
+
+	waitLock.Lock()
+	return server, addr, fin, nil
 }

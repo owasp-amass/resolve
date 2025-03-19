@@ -2,14 +2,15 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build !linux
-
-package resolve
+package types
 
 import (
 	"net"
+
+	"github.com/miekg/dns"
 )
 
-func (r *ConnPool) ListenPacket() (net.PacketConn, error) {
-	return net.ListenPacket("udp", ":0")
+type Conn interface {
+	Close()
+	WriteMsg(msg *dns.Msg, addr net.Addr) error
 }

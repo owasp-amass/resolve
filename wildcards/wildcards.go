@@ -2,26 +2,20 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package wildcards
 
 import (
 	"context"
-	"math/rand"
-	"net"
+	"io"
+	"log"
 	"strings"
 	"sync"
 
 	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
-)
-
-// Constants related to DNS labels.
-const (
-	MaxDNSNameLen  = 253
-	MaxDNSLabelLen = 63
-	MinLabelLen    = 6
-	MaxLabelLen    = 24
-	LDHChars       = "abcdefghijklmnopqrstuvwxyz0123456789-"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/utils"
 )
 
 const (
@@ -35,58 +29,44 @@ var wildcardQueryTypes = []uint16{
 	dns.TypeAAAA,
 }
 
+type Detector struct {
+	sync.Mutex
+	log       *log.Logger
+	server    *servers.Nameserver
+	conns     *conn.Conn
+	wildcards map[string]*wildcard
+}
+
 type wildcard struct {
 	sync.Mutex
 	Detected bool
 	Answers  []dns.RR
 }
 
-// UnlikelyName takes a subdomain name and returns an unlikely DNS name within that subdomain.
-func UnlikelyName(sub string) string {
-	ldh := []rune(LDHChars)
-	ldhLen := len(ldh)
-
-	// Determine the max label length
-	l := MaxDNSNameLen - (len(sub) + 1)
-	if l > MaxLabelLen {
-		l = MaxLabelLen
-	} else if l < MinLabelLen {
-		l = MinLabelLen
-	}
-	// Shuffle our LDH characters
-	rand.Shuffle(ldhLen, func(i, j int) {
-		ldh[i], ldh[j] = ldh[j], ldh[i]
-	})
-
-	var newlabel string
-	l = MinLabelLen + rand.Intn((l-MinLabelLen)+1)
-	for i := 0; i < l; i++ {
-		sel := rand.Int() % (ldhLen - 1)
-		newlabel = newlabel + string(ldh[sel])
+func NewDetector(serv *servers.Nameserver, conns *conn.Conn, logger *log.Logger) *Detector {
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
 	}
 
-	newlabel = strings.Trim(newlabel, "-")
-	if newlabel == "" {
-		return newlabel
+	return &Detector{
+		log:       logger,
+		server:    serv,
+		conns:     conns,
+		wildcards: make(map[string]*wildcard),
 	}
-	return newlabel + "." + sub
 }
 
 // WildcardDetected returns true when the provided DNS response could be a wildcard match.
-func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain string) bool {
-	if d := r.getDetectionResolver(); d == nil {
-		return false
-	}
-
-	name := strings.ToLower(RemoveLastDot(resp.Question[0].Name))
-	domain = strings.ToLower(RemoveLastDot(domain))
+func (r *Detector) WildcardDetected(ctx context.Context, resp *dns.Msg, domain string) bool {
+	name := strings.ToLower(utils.RemoveLastDot(resp.Question[0].Name))
+	domain = strings.ToLower(utils.RemoveLastDot(domain))
 	if labels := strings.Split(name, "."); len(labels) > len(strings.Split(domain, ".")) {
 		name = strings.Join(labels[1:], ".")
 	}
 
 	var found bool
 	// Check for a DNS wildcard at each label starting with the registered domain
-	RegisteredToFQDN(domain, name, func(sub string) bool {
+	utils.RegisteredToFQDN(domain, name, func(sub string) bool {
 		if w := r.getWildcard(ctx, sub); w.respMatchesWildcard(resp) {
 			found = true
 			return true
@@ -96,36 +76,7 @@ func (r *Resolvers) WildcardDetected(ctx context.Context, resp *dns.Msg, domain 
 	return found
 }
 
-// SetDetectionResolver sets the provided DNS resolver as responsible for wildcard detection.
-func (r *Resolvers) SetDetectionResolver(addr string) {
-	r.Lock()
-	defer r.Unlock()
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		// add the default port number to the IP address
-		addr = net.JoinHostPort(addr, "53")
-	}
-	// check that this address will not create a duplicate resolver
-	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
-		if d := r.pool.LookupResolver(uaddr.IP.String()); d != nil {
-			r.detector = d
-			return
-		}
-		if res := NewResolver(addr, r.timeout); res != nil {
-			r.detector = res
-			r.pool.AddResolver(res)
-		}
-	}
-}
-
-func (r *Resolvers) getDetectionResolver() *resolver {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.detector
-}
-
-func (r *Resolvers) getWildcard(ctx context.Context, sub string) *wildcard {
+func (r *Detector) getWildcard(ctx context.Context, sub string) *wildcard {
 	r.Lock()
 	w, found := r.wildcards[sub]
 	if !found {
@@ -164,7 +115,7 @@ func (w *wildcard) respMatchesWildcard(resp *dns.Msg) bool {
 }
 
 // Determines if the provided subdomain has a DNS wildcard.
-func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.RR) {
+func (r *Detector) wildcardTest(ctx context.Context, sub string) (bool, []dns.RR) {
 	var detected bool
 	var answers []dns.RR
 
@@ -205,7 +156,7 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.R
 		var data string
 
 		if a.Header().Rrtype == dns.TypeCNAME {
-			data = RemoveLastDot((a.(*dns.CNAME)).Target)
+			data = utils.RemoveLastDot((a.(*dns.CNAME)).Target)
 		} else if a.Header().Rrtype == dns.TypeA {
 			data = (a.(*dns.A)).A.String()
 		} else if a.Header().Rrtype == dns.TypeAAAA {
@@ -218,24 +169,20 @@ func (r *Resolvers) wildcardTest(ctx context.Context, sub string) (bool, []dns.R
 		}
 	}
 	if detected {
-		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.detector.address, "*."+sub)
+		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.server.Address, "*."+sub)
 	}
 	return detected, final
 }
 
-func (r *Resolvers) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []dns.RR {
-	detector := r.getDetectionResolver()
-	if detector == nil {
-		return nil
-	}
+func (r *Detector) makeQueryAttempts(ctx context.Context, name string, qtype uint16) []dns.RR {
 loop:
 	for i := 0; i < maxQueryAttempts; i++ {
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
-		go detector.sendRequest(&request{
-			Res:    detector,
-			Msg:    QueryMsg(name, qtype),
+		go r.server.SendRequest(&servers.Request{
+			Server: r.server,
+			Msg:    utils.QueryMsg(name, qtype),
 			Result: ch,
 		}, r.conns)
 
@@ -264,7 +211,7 @@ func intersectRecordData(set *stringset.Set, ans []dns.RR) {
 
 	for _, a := range ans {
 		if a.Header().Rrtype == dns.TypeCNAME {
-			records.Insert(RemoveLastDot((a.(*dns.CNAME)).Target))
+			records.Insert(utils.RemoveLastDot((a.(*dns.CNAME)).Target))
 		} else if a.Header().Rrtype == dns.TypeA {
 			records.Insert((a.(*dns.A)).A.String())
 		} else if a.Header().Rrtype == dns.TypeAAAA {
@@ -278,7 +225,7 @@ func intersectRecordData(set *stringset.Set, ans []dns.RR) {
 func insertRecordData(set *stringset.Set, ans []dns.RR) {
 	for _, a := range ans {
 		if a.Header().Rrtype == dns.TypeCNAME {
-			set.Insert(RemoveLastDot((a.(*dns.CNAME)).Target))
+			set.Insert(utils.RemoveLastDot((a.(*dns.CNAME)).Target))
 		} else if a.Header().Rrtype == dns.TypeA {
 			set.Insert((a.(*dns.A)).A.String())
 		} else if a.Header().Rrtype == dns.TypeAAAA {

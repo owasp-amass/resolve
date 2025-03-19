@@ -2,29 +2,22 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package servers
 
 import (
 	"context"
 	"math"
-	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
 const (
+	minLimit            = 1
+	maxLimit            = 10
 	minUpdateSampleSize = 10
 	maxInterval         = time.Second
 )
-
-type rateTrack struct {
-	sync.Mutex
-	limiter *rate.Limiter
-	avg     time.Duration
-	count   int
-	first   bool
-}
 
 func newRateTrack() *rateTrack {
 	limit := rate.Every(100 * time.Millisecond)
@@ -35,12 +28,12 @@ func newRateTrack() *rateTrack {
 	}
 }
 
-// Take blocks as required by the implemented rate limiter.
+// Take blocks as long as required by the rate limiter.
 func (r *rateTrack) Take() {
 	_ = r.limiter.Wait(context.TODO())
 }
 
-// ReportResponseTime provides the response time for a request.
+// ReportRTT accepts a round-trip-time for a DNS query request.
 func (r *rateTrack) ReportRTT(rtt time.Duration) {
 	r.Lock()
 	defer r.Unlock()
@@ -66,7 +59,15 @@ func (r *rateTrack) ReportRTT(rtt time.Duration) {
 
 // update the QPS rate limiter and reset counters
 func (r *rateTrack) update() {
-	r.limiter.SetLimit(rate.Every(r.avg))
+	limit := rate.Every(r.avg)
+
+	if limit > maxLimit {
+		limit = maxLimit
+	} else if limit < minLimit {
+		limit = minLimit
+	}
+
+	r.limiter.SetLimit(limit)
 	r.avg = 0
 	r.count = 0
 }

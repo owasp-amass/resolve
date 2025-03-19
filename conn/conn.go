@@ -2,7 +2,7 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package resolve
+package conn
 
 import (
 	"errors"
@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
 const headerSize = 12
@@ -27,29 +29,29 @@ type connection struct {
 	done chan struct{}
 }
 
-type ConnPool struct {
+type Conn struct {
 	sync.Mutex
 	done      chan struct{}
 	conns     []*connection
-	sel       Selector
+	sel       types.Selector
 	nextWrite int
 	cpus      int
 }
 
-func NewConnPool(cpus int, sel Selector) *ConnPool {
-	conns := &ConnPool{
+func New(cpus int, sel types.Selector) *Conn {
+	conns := &Conn{
 		done: make(chan struct{}),
 		sel:  sel,
 		cpus: cpus,
 	}
 
 	for i := 0; i < cpus; i++ {
-		_ = conns.Add()
+		_ = conns.add()
 	}
 	return conns
 }
 
-func (r *ConnPool) Close() {
+func (r *Conn) Close() {
 	r.Lock()
 	defer r.Unlock()
 
@@ -63,7 +65,7 @@ func (r *ConnPool) Close() {
 	}
 }
 
-func (r *ConnPool) Next() net.PacketConn {
+func (r *Conn) next() net.PacketConn {
 	r.Lock()
 	defer r.Unlock()
 
@@ -76,7 +78,7 @@ func (r *ConnPool) Next() net.PacketConn {
 	return r.conns[cur].conn
 }
 
-func (r *ConnPool) Add() error {
+func (r *Conn) add() error {
 	conn, err := r.ListenPacket()
 	if err != nil {
 		return err
@@ -93,7 +95,7 @@ func (r *ConnPool) Add() error {
 	return nil
 }
 
-func (r *ConnPool) WriteMsg(msg *dns.Msg, addr net.Addr) error {
+func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	var n int
 	var err error
 	var out []byte
@@ -101,7 +103,7 @@ func (r *ConnPool) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	if out, err = msg.Pack(); err == nil {
 		err = errors.New("failed to obtain a connection")
 
-		if conn := r.Next(); conn != nil {
+		if conn := r.next(); conn != nil {
 			if n, err = conn.WriteTo(out, addr); err == nil && n < len(out) {
 				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 			}
@@ -110,7 +112,7 @@ func (r *ConnPool) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	return err
 }
 
-func (r *ConnPool) responses(c *connection) {
+func (r *Conn) responses(c *connection) {
 	b := make([]byte, dns.DefaultMsgSize)
 
 	for {
@@ -135,27 +137,27 @@ func (r *ConnPool) responses(c *connection) {
 	}
 }
 
-func (r *ConnPool) processResponse(response *resp) {
+func (r *Conn) processResponse(response *resp) {
 	addr, _, _ := net.SplitHostPort(response.Addr.String())
 
-	res := r.sel.LookupResolver(addr)
-	if res == nil {
+	serv := r.sel.Lookup(addr)
+	if serv == nil {
 		return
 	}
 
 	msg := response.Msg
 	name := msg.Question[0].Name
-	if req := res.xchgs.remove(msg.Id, name); req != nil {
-		req.Resp = msg
-		req.RecvAt = response.At
+	if req := serv.XchgManager().Remove(msg.Id, name); req != nil {
+		req.SetResponse(msg)
+		req.SetRecvAt(response.At)
 
-		if req.Resp.Truncated {
-			req.Res.tcpExchange(req)
+		if req.Response().Truncated {
+			utils.TCPExchange(req, 2*time.Second)
 		} else {
-			req.Result <- req.Resp
-			rtt := req.RecvAt.Sub(req.SentAt)
-			req.Res.rate.ReportRTT(rtt)
-			req.release()
+			req.ResultChan() <- req.Response()
+			rtt := req.RecvAt().Sub(req.SentAt())
+			req.Server().RateMonitor().ReportRTT(rtt)
+			req.Release()
 		}
 	}
 }
