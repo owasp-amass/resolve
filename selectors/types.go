@@ -11,6 +11,10 @@ import (
 	"github.com/owasp-amass/resolve/types"
 )
 
+type single struct {
+	server types.Nameserver
+}
+
 type random struct {
 	sync.Mutex
 	list   []types.Nameserver

@@ -181,7 +181,8 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 		}
 
 		serv := servers.NewNameserver(detector, delay)
-		p.Detector = wildcards.NewDetector(serv, conns, p.Log)
+		dconns := conn.New(runtime.NumCPU(), selectors.NewSingle(serv))
+		p.Detector = wildcards.NewDetector(serv, dconns, p.Log)
 	}
 	return nil
 }
