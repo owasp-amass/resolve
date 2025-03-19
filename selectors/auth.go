@@ -11,22 +11,52 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve/servers"
 	"github.com/owasp-amass/resolve/types"
 	"github.com/owasp-amass/resolve/utils"
 )
 
-func NewAuthoritative(timeout time.Duration) *authoritative {
+type NewServer func(addr string, timeout time.Duration) types.Nameserver
+
+var rootIPs = []string{
+	"198.41.0.4",
+	"199.9.14.201",
+	"192.33.4.12",
+	"199.7.91.13",
+	"192.203.230.10",
+	"192.5.5.241",
+	"192.112.36.4",
+	"198.97.190.53",
+	"192.36.148.17",
+	"192.58.128.30",
+	"193.0.14.129",
+	"199.7.83.42",
+	"202.12.27.33",
+}
+
+func RootServers(timeout time.Duration, newserver NewServer) []types.Nameserver {
+	var servs []types.Nameserver
+
+	for _, ip := range rootIPs {
+		if serv := newserver(ip, timeout); serv != nil {
+			servs = append(servs, serv)
+		}
+	}
+
+	return servs
+}
+
+func NewAuthoritative(timeout time.Duration, newserver NewServer) *authoritative {
 	auth := &authoritative{
 		timeout:       timeout,
+		newserver:     newserver,
 		lookup:        make(map[string]types.Nameserver),
 		fqdnToServers: make(map[string][]string),
 		fqdnToNSs:     make(map[string][]types.Nameserver),
 		serverToNSs:   make(map[string]types.Nameserver),
 	}
 
-	for _, ns := range utils.RootServers(timeout) {
-		addr := ns.Address.IP.String()
+	for _, ns := range RootServers(timeout, newserver) {
+		addr := ns.Address().IP.String()
 
 		auth.lookup[addr] = ns
 		auth.list = append(auth.list, ns)
@@ -233,7 +263,7 @@ func (r *authoritative) serverNameToResolverObj(server string, ns types.Nameserv
 			for _, rr := range utils.AnswersByType(m, dns.TypeA) {
 				if record, ok := rr.(*dns.A); ok {
 					ip := net.JoinHostPort(record.A.String(), "53")
-					return servers.NewNameserver(ip, r.timeout)
+					return r.newserver(ip, r.timeout)
 				}
 			}
 			break

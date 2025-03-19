@@ -12,9 +12,7 @@ import (
 	"sync"
 
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve/conn"
-	"github.com/owasp-amass/resolve/selectors"
-	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
 	"golang.org/x/time/rate"
 )
 
@@ -23,13 +21,13 @@ type Pool struct {
 	sync.Mutex
 	done     chan struct{}
 	log      *log.Logger
-	Conns    *conn.Conn
-	Selector selectors.Selector
+	Conns    types.Conn
+	Selector types.Selector
 	rate     *rate.Limiter
 }
 
 // New initializes a DNS nameserver pool.
-func New(qps int, sel selectors.Selector, conns *conn.Conn, logger *log.Logger) *Pool {
+func New(qps int, sel types.Selector, conns types.Conn, logger *log.Logger) *Pool {
 	limit := rate.Inf
 	if qps > 0 {
 		limit = rate.Limit(qps)
@@ -69,15 +67,15 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		if req := servers.RequestPool.Get().(*servers.Request); req != nil {
-			req.Msg = msg
-			req.Result = ch
+		if req := types.RequestPool.Get().(types.Request); req != nil {
+			req.SetMessage(msg)
+			req.SetResultChan(ch)
 			go r.processSingleReq(req)
 			return
 		}
 	}
 
-	msg.Rcode = servers.RcodeNoResponse
+	msg.Rcode = types.RcodeNoResponse
 	ch <- msg
 }
 
@@ -108,16 +106,16 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 	return resp, err
 }
 
-func (r *Pool) processSingleReq(req *servers.Request) {
-	name := req.Msg.Question[0].Name
+func (r *Pool) processSingleReq(req types.Request) {
+	name := req.Message().Question[0].Name
 
 	if serv := r.Selector.Get(name); serv != nil {
-		req.Server = serv
+		req.SetServer(serv)
 		_ = r.rate.Wait(context.TODO())
-		serv.sendRequest(req, r.Conns)
+		_ = serv.SendRequest(req, r.Conns)
 		return
 	}
 
-	req.ErrNoResponse()
+	req.NoResponse()
 	req.Release()
 }

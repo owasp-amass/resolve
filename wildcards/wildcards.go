@@ -13,8 +13,7 @@ import (
 
 	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve/conn"
-	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
 	"github.com/owasp-amass/resolve/utils"
 )
 
@@ -32,8 +31,8 @@ var wildcardQueryTypes = []uint16{
 type Detector struct {
 	sync.Mutex
 	log       *log.Logger
-	server    *servers.Nameserver
-	conns     *conn.Conn
+	server    types.Nameserver
+	conns     types.Conn
 	wildcards map[string]*wildcard
 }
 
@@ -43,7 +42,7 @@ type wildcard struct {
 	Answers  []dns.RR
 }
 
-func NewDetector(serv *servers.Nameserver, conns *conn.Conn, logger *log.Logger) *Detector {
+func NewDetector(serv types.Nameserver, conns types.Conn, logger *log.Logger) *Detector {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -169,7 +168,7 @@ func (r *Detector) wildcardTest(ctx context.Context, sub string) (bool, []dns.RR
 		}
 	}
 	if detected {
-		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.server.Address, "*."+sub)
+		r.log.Printf("DNS wildcard detected: Resolver %s: %s", r.server.Address(), "*."+sub)
 	}
 	return detected, final
 }
@@ -180,11 +179,12 @@ loop:
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
-		go r.server.SendRequest(&servers.Request{
-			Server: r.server,
-			Msg:    utils.QueryMsg(name, qtype),
-			Result: ch,
-		}, r.conns)
+		msg := utils.QueryMsg(name, qtype)
+		req := types.RequestPool.Get().(types.Request)
+		req.SetMessage(msg)
+		req.SetServer(r.server)
+		req.SetResultChan(ch)
+		go func() { _ = r.server.SendRequest(req, r.conns) }()
 
 		select {
 		case <-ctx.Done():

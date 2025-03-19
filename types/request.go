@@ -1,0 +1,149 @@
+// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
+// SPDX-License-Identifier: Apache-2.0
+
+package types
+
+import (
+	"sync"
+	"time"
+
+	"github.com/miekg/dns"
+)
+
+// RcodeNoResponse is a special status code used to indicate no response or package error.
+const RcodeNoResponse int = 50
+
+// DefaultTimeout is the duration waited until a DNS query expires.
+const DefaultTimeout = 2 * time.Second
+
+type Request interface {
+	Server() Nameserver
+	SetServer(s Nameserver)
+	SentAt() time.Time
+	SetSentAt(t time.Time)
+	RecvAt() time.Time
+	SetRecvAt(t time.Time)
+	Message() *dns.Msg
+	SetMessage(m *dns.Msg)
+	Response() *dns.Msg
+	SetResponse(m *dns.Msg)
+	ResultChan() chan *dns.Msg
+	SetResultChan(c chan *dns.Msg)
+	NoResponse()
+	Release()
+}
+
+var RequestPool = sync.Pool{
+	New: func() any {
+		return new(request)
+	},
+}
+
+type request struct {
+	sync.Mutex
+	serv      Nameserver
+	sentAt    time.Time
+	recvAt    time.Time
+	msg, resp *dns.Msg
+	result    chan *dns.Msg
+}
+
+func (r *request) Server() Nameserver {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.serv
+}
+
+func (r *request) SetServer(s Nameserver) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.serv = s
+}
+
+func (r *request) SentAt() time.Time {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.sentAt
+}
+
+func (r *request) SetSentAt(t time.Time) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.sentAt = t
+}
+
+func (r *request) RecvAt() time.Time {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.recvAt
+}
+
+func (r *request) SetRecvAt(t time.Time) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.recvAt = t
+}
+
+func (r *request) Message() *dns.Msg {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.msg
+}
+
+func (r *request) SetMessage(m *dns.Msg) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.msg = m
+}
+
+func (r *request) Response() *dns.Msg {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.resp
+}
+
+func (r *request) SetResponse(m *dns.Msg) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.resp = m
+}
+
+func (r *request) ResultChan() chan *dns.Msg {
+	r.Lock()
+	defer r.Unlock()
+
+	return r.result
+}
+
+func (r *request) SetResultChan(c chan *dns.Msg) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.result = c
+}
+
+func (r *request) NoResponse() {
+	r.Lock()
+	defer r.Unlock()
+
+	if r.msg != nil {
+		r.msg.Rcode = RcodeNoResponse
+	}
+	r.result <- r.msg
+}
+
+func (r *request) Release() {
+	*r = request{} // Zero it out
+	RequestPool.Put(r)
+}

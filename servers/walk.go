@@ -51,14 +51,14 @@ func (ns *nameserver) searchGap(name string, conns types.Conn) (*dns.NSEC, error
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
-		req := RequestPool.Get().(*request)
-		req.result = ch
-		req.serv = ns
-		req.msg = utils.WalkMsg(name, dns.TypeNSEC)
+		msg := utils.WalkMsg(name, dns.TypeNSEC)
+		req := types.RequestPool.Get().(types.Request)
+		req.SetServer(ns)
+		req.SetMessage(msg)
+		req.SetResultChan(ch)
+		_ = ns.SendRequest(req, conns)
 
-		ns.SendRequest(req, conns)
 		resp := <-ch
-
 		if resp.Rcode == dns.RcodeNameError {
 			break
 		}

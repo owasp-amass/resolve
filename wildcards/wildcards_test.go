@@ -36,11 +36,11 @@ func TestWildcardDetected(t *testing.T) {
 	sel := selectors.NewRandom()
 	serv := servers.NewNameserver(addrstr, timeout)
 	sel.Add(serv)
-	conns := conn.New(1, sel.Lookup)
+	conns := conn.New(1, sel)
 	detector := NewDetector(serv, conns, nil)
 	p := pool.New(0, sel, conns, nil)
 	defer p.Stop()
-	defer serv.Stop()
+	defer serv.Close()
 	defer sel.Close()
 	defer conns.Close()
 

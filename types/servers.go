@@ -11,23 +11,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-type Request interface {
-	Server() Nameserver
-	SetServer(s Nameserver)
-	SentAt() time.Time
-	SetSentAt(t time.Time)
-	RecvAt() time.Time
-	SetRecvAt(t time.Time)
-	Message() *dns.Msg
-	SetMessage(m *dns.Msg)
-	Response() *dns.Msg
-	SetResponse(m *dns.Msg)
-	ResultChan() chan *dns.Msg
-	SetResultChan(c chan *dns.Msg)
-	NoResponse()
-	Release()
-}
-
 type Nameserver interface {
 	Address() *net.UDPAddr
 	XchgManager() XchgManager

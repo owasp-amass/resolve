@@ -20,7 +20,13 @@ import (
 
 	"github.com/caffix/queue"
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve"
+	"github.com/owasp-amass/resolve/conn"
+	"github.com/owasp-amass/resolve/pool"
+	"github.com/owasp-amass/resolve/selectors"
+	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
+	"github.com/owasp-amass/resolve/wildcards"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -32,18 +38,18 @@ const (
 )
 
 type params struct {
-	Log       *log.Logger
-	Pool      *resolve.Resolvers
-	Requests  chan string
-	Qtypes    []uint16
-	Quiet     bool
-	Input     *os.File
-	Output    *os.File
-	LogFile   *os.File
-	QPS       int
-	Retries   int
-	Detection bool
-	Help      bool
+	Log      *log.Logger
+	Pool     *pool.Pool
+	Requests chan string
+	Qtypes   []uint16
+	Quiet    bool
+	Input    *os.File
+	Output   *os.File
+	LogFile  *os.File
+	QPS      int
+	Retries  int
+	Detector *wildcards.Detector
+	Help     bool
 }
 
 func main() {
@@ -151,33 +157,31 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 	}
 	delay := time.Duration(timeout) * time.Millisecond
 
-	var sel resolve.Selector
 	// Load DNS resolvers into the pool
 	if rpath != "" {
 		list = append(list, ResolverFileList(rpath)...)
 	}
-	if len(list) > 0 {
-		sel = resolve.NewRandomSelector()
 
-		for _, addr := range list {
-			if res := resolve.NewResolver(addr, delay); res != nil {
-				sel.AddResolver(res)
-			}
-		}
+	var sel types.Selector
+	if len(list) == 0 {
+		sel = selectors.NewAuthoritative(delay, servers.NewNameserver)
 	} else {
-		sel = resolve.NewAuthNSSelector(delay)
+		sel = selectors.NewRandom()
+		for _, addrstr := range list {
+			sel.Add(servers.NewNameserver(addrstr, delay))
+		}
 	}
 
-	conns := resolve.NewConnPool(runtime.NumCPU(), sel)
-	p.Pool = resolve.NewResolvers(qps, delay, sel, conns)
+	conns := conn.New(runtime.NumCPU(), sel)
+	p.Pool = pool.New(0, sel, conns, p.Log)
 	// Attempt to set a resolver to perform DNS wildcard detection
 	if detector != "" {
 		if _, _, err := net.SplitHostPort(detector); err != nil && net.ParseIP(detector) == nil {
-			p.Pool.Stop()
 			return fmt.Errorf("failed to provide a valid IP address for DNS wildcard detection: %s", detector)
 		}
-		p.Pool.SetDetectionResolver(detector)
-		p.Detection = true
+
+		serv := servers.NewNameserver(detector, delay)
+		p.Detector = wildcards.NewDetector(serv, conns, p.Log)
 	}
 	return nil
 }
@@ -200,13 +204,13 @@ func EventLoop(p *params) {
 			count += len(p.Qtypes)
 			sendInitialRequests(context.Background(), name, queries, responses, p)
 		case resp := <-responses:
-			name := resolve.RemoveLastDot(strings.ToLower(resp.Question[0].Name))
+			name := utils.RemoveLastDot(strings.ToLower(resp.Question[0].Name))
 			k := key(name, resp.Question[0].Qtype)
 			// Check if there was an error or timeout requiring another attempt
-			if resp.Rcode == resolve.RcodeNoResponse {
+			if resp.Rcode == types.RcodeNoResponse {
 				queries[k]++
 				if queries[k] <= p.Retries {
-					p.Pool.Query(context.Background(), resolve.QueryMsg(name, resp.Question[0].Qtype), responses)
+					p.Pool.Query(context.Background(), utils.QueryMsg(name, resp.Question[0].Qtype), responses)
 					continue
 				}
 			} else {
@@ -247,15 +251,15 @@ func update(avg, item, n float32) float32 {
 func sendInitialRequests(ctx context.Context, name string, queries map[string]int, responses chan *dns.Msg, p *params) {
 	for _, qtype := range p.Qtypes {
 		queries[key(name, qtype)] = 1
-		p.Pool.Query(ctx, resolve.QueryMsg(name, qtype), responses)
+		p.Pool.Query(ctx, utils.QueryMsg(name, qtype), responses)
 	}
 }
 
 func processResponse(ctx context.Context, name string, resp *dns.Msg, out queue.Queue, p *params) {
-	if p.Detection {
+	if p.Detector != nil {
 		domain, err := publicsuffix.EffectiveTLDPlusOne(name)
 
-		if err != nil || p.Pool.WildcardDetected(ctx, resp, domain) {
+		if err != nil || p.Detector.WildcardDetected(ctx, resp, domain) {
 			resp = nil
 		}
 	}

@@ -13,41 +13,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
-	m := new(dns.Msg)
-	m.SetReply(req)
-
-	m.Answer = make([]dns.RR, 1)
-	m.Answer[0] = &dns.A{
-		Hdr: dns.RR_Header{
-			Name:   m.Question[0].Name,
-			Rrtype: dns.TypeA,
-			Class:  dns.ClassINET,
-			Ttl:    0,
-		},
-		A: net.ParseIP("192.168.1.1"),
-	}
-	_ = w.WriteMsg(m)
-}
-
-func truncatedHandler(w dns.ResponseWriter, req *dns.Msg) {
-	m := new(dns.Msg)
-	m.SetReply(req)
-
-	m.Truncated = true
-	m.Answer = make([]dns.RR, 1)
-	m.Answer[0] = &dns.A{
-		Hdr: dns.RR_Header{
-			Name:   m.Question[0].Name,
-			Rrtype: dns.TypeA,
-			Class:  dns.ClassINET,
-			Ttl:    0,
-		},
-		A: net.ParseIP("192.168.1.1"),
-	}
-	_ = w.WriteMsg(m)
-}
-
 func RunLocalUDPServer(laddr string, opts ...func(*dns.Server)) (*dns.Server, string, chan error, error) {
 	pc, err := net.ListenPacket("udp", laddr)
 	if err != nil {

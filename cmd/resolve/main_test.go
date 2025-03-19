@@ -30,11 +30,10 @@ func TestObtainParams(t *testing.T) {
 			args:  []string{},
 			ok:    true,
 			expected: &params{
-				Qtypes:    []uint16{dns.TypeA},
-				Quiet:     defaultQuiet,
-				Retries:   defaultRetries,
-				Detection: false,
-				Help:      defaultHelp,
+				Qtypes:  []uint16{dns.TypeA},
+				Quiet:   defaultQuiet,
+				Retries: defaultRetries,
+				Help:    defaultHelp,
 			},
 		}, {
 			label:    "Invalid argument",
@@ -46,10 +45,9 @@ func TestObtainParams(t *testing.T) {
 			args:  []string{"-h"},
 			ok:    true,
 			expected: &params{
-				Quiet:     defaultQuiet,
-				Retries:   defaultRetries,
-				Detection: false,
-				Help:      true,
+				Quiet:   defaultQuiet,
+				Retries: defaultRetries,
+				Help:    true,
 			},
 		}, {
 			label:    "Cannot open input file",
@@ -61,12 +59,11 @@ func TestObtainParams(t *testing.T) {
 			args:  []string{"-t", "CNAME,A,AAAA,TXT", "-c", "5", "-qps", "10", "-q", "-d", "8.8.8.8"},
 			ok:    true,
 			expected: &params{
-				Qtypes:    []uint16{dns.TypeCNAME, dns.TypeA, dns.TypeAAAA, dns.TypeTXT},
-				Quiet:     true,
-				QPS:       10,
-				Retries:   5,
-				Detection: true,
-				Help:      defaultHelp,
+				Qtypes:  []uint16{dns.TypeCNAME, dns.TypeA, dns.TypeAAAA, dns.TypeTXT},
+				Quiet:   true,
+				QPS:     10,
+				Retries: 5,
+				Help:    defaultHelp,
 			},
 		},
 	}
@@ -94,7 +91,7 @@ func TestObtainParams(t *testing.T) {
 
 func compareParams(got, expected *params) bool {
 	if got.QPS != expected.QPS || got.Retries != expected.Retries ||
-		got.Detection != expected.Detection || got.Help != expected.Help || got.Quiet != expected.Quiet {
+		got.Help != expected.Help || got.Quiet != expected.Quiet {
 		return false
 	}
 	for i, qtype := range expected.Qtypes {

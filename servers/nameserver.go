@@ -12,7 +12,11 @@ import (
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewNameserver(addr string, timeout time.Duration) *nameserver {
+func NewNameserver(addr string, timeout time.Duration) types.Nameserver {
+	return newNameserver(addr, timeout)
+}
+
+func newNameserver(addr string, timeout time.Duration) *nameserver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
@@ -27,9 +31,8 @@ func NewNameserver(addr string, timeout time.Duration) *nameserver {
 			rate:    newRateTrack(),
 			timeout: timeout,
 		}
+		go ns.timeouts()
 	}
-
-	go ns.timeouts()
 	return ns
 }
 
@@ -62,14 +65,14 @@ func (ns *nameserver) Close() {
 
 func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	if req == nil {
-		return errors.New("The request is nil")
+		return errors.New("the request is nil")
 	}
 
 	select {
 	case <-ns.done:
 		req.NoResponse()
 		req.Release()
-		return errors.New("The nameserver has been closed")
+		return errors.New("the nameserver has been closed")
 	default:
 	}
 
@@ -81,7 +84,7 @@ func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 	if conns == nil {
 		req.NoResponse()
 		req.Release()
-		return errors.New("The connection is nil")
+		return errors.New("the connection is nil")
 	}
 
 	if err := ns.xchgs.Add(req); err != nil {

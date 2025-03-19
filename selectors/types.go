@@ -20,6 +20,7 @@ type random struct {
 type authoritative struct {
 	sync.Mutex
 	timeout       time.Duration
+	newserver     NewServer
 	list          []types.Nameserver
 	lookup        map[string]types.Nameserver
 	roots         []types.Nameserver

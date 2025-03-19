@@ -2,7 +2,7 @@
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
-package servers
+package resolve
 
 import (
 	"log"
@@ -13,13 +13,14 @@ import (
 	"github.com/owasp-amass/resolve/pool"
 	"github.com/owasp-amass/resolve/selectors"
 	"github.com/owasp-amass/resolve/servers"
+	"github.com/owasp-amass/resolve/types"
 )
 
 func NewServerPool(timeout time.Duration, logger *log.Logger, addrs ...string) *pool.Pool {
-	var sel selectors.Selector
+	var sel types.Selector
 
 	if len(addrs) == 0 {
-		sel = selectors.NewAuthoritative(timeout)
+		sel = selectors.NewAuthoritative(timeout, servers.NewNameserver)
 	} else {
 		sel = selectors.NewRandom()
 		for _, addrstr := range addrs {
@@ -27,6 +28,6 @@ func NewServerPool(timeout time.Duration, logger *log.Logger, addrs ...string) *
 		}
 	}
 
-	conns := conn.New(runtime.NumCPU(), sel.Lookup)
+	conns := conn.New(runtime.NumCPU(), sel)
 	return pool.New(0, sel, conns, logger)
 }

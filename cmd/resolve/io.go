@@ -13,7 +13,7 @@ import (
 
 	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
-	"github.com/owasp-amass/resolve"
+	"github.com/owasp-amass/resolve/utils"
 )
 
 // CommaSep implements the flag.Value interface.
@@ -62,7 +62,7 @@ func ResolverFileList(p string) []string {
 
 func InputDomainNames(input io.Reader, requests chan string) {
 	_ = ExtractLines(input, func(str string) error {
-		name := resolve.RemoveLastDot(strings.ToLower(str))
+		name := utils.RemoveLastDot(strings.ToLower(str))
 
 		if _, ok := dns.IsDomainName(name); ok {
 			requests <- name

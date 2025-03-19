@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
 	"golang.org/x/time/rate"
 )
@@ -20,14 +19,6 @@ type nameserver struct {
 	xchgs   *xchgMgr
 	rate    *rateTrack
 	timeout time.Duration
-}
-
-type request struct {
-	serv      *nameserver
-	sentAt    time.Time
-	recvAt    time.Time
-	msg, resp *dns.Msg
-	result    chan *dns.Msg
 }
 
 type rateTrack struct {

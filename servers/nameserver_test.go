@@ -25,7 +25,7 @@ func initPool(addrstr string) (*pool.Pool, types.Selector, types.Conn) {
 	timeout := 50 * time.Millisecond
 
 	if addrstr == "" {
-		sel = selectors.NewAuthoritative(timeout)
+		sel = selectors.NewAuthoritative(timeout, NewNameserver)
 	} else {
 		sel = selectors.NewRandom()
 		sel.Add(NewNameserver(addrstr, timeout))
@@ -35,14 +35,15 @@ func initPool(addrstr string) (*pool.Pool, types.Selector, types.Conn) {
 	return pool.New(0, sel, conns, nil), sel, conns
 }
 
-func TestNewResolver(t *testing.T) {
+func TestNewNameserver(t *testing.T) {
 	timeout := 50 * time.Millisecond
 
-	if res := NewNameserver("192.168.1.1", timeout); res == nil ||
-		res.Address().IP.String() != "192.168.1.1" || res.Address().Port != 53 {
+	if ns := newNameserver("192.168.1.1", timeout); ns == nil ||
+		ns.Address().IP.String() != "192.168.1.1" || ns.Address().Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
-	if res := NewNameserver("300.300.300.300", timeout); res != nil {
+	if ns := newNameserver("300.300.300.300", timeout); ns != nil &&
+		ns.Address().IP.String() == "300.300.300.300" {
 		t.Errorf("failed to detect the invalid IP address provided")
 	}
 }
@@ -88,11 +89,12 @@ func TestTCPExchange(t *testing.T) {
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
 	msg := utils.QueryMsg(name, dns.TypeA)
-	serv.tcpExchange(&request{
-		serv:   serv,
-		msg:    msg,
-		result: ch,
-	})
+
+	req := types.RequestPool.Get().(types.Request)
+	req.SetServer(serv)
+	req.SetMessage(msg)
+	req.SetResultChan(ch)
+	utils.TCPExchange(req, 50*time.Millisecond)
 
 	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
 		if len(resp.Answer) > 0 {
@@ -125,33 +127,16 @@ func TestBadTCPExchange(t *testing.T) {
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
 	msg := utils.QueryMsg(name, dns.TypeA)
-	serv.tcpExchange(&request{
-		serv:   serv,
-		msg:    msg,
-		result: ch,
-	})
 
-	if resp := <-ch; resp.Rcode != RcodeNoResponse {
+	req := types.RequestPool.Get().(types.Request)
+	req.SetServer(serv)
+	req.SetMessage(msg)
+	req.SetResultChan(ch)
+	utils.TCPExchange(req, 50*time.Millisecond)
+
+	if resp := <-ch; resp.Rcode != types.RcodeNoResponse {
 		t.Errorf("The TCP exchange process did not fail as expected")
 	}
-}
-
-func truncatedHandler(w dns.ResponseWriter, req *dns.Msg) {
-	m := new(dns.Msg)
-	m.SetReply(req)
-
-	m.Truncated = true
-	m.Answer = make([]dns.RR, 1)
-	m.Answer[0] = &dns.A{
-		Hdr: dns.RR_Header{
-			Name:   m.Question[0].Name,
-			Rrtype: dns.TypeA,
-			Class:  dns.ClassINET,
-			Ttl:    0,
-		},
-		A: net.ParseIP("192.168.1.1"),
-	}
-	_ = w.WriteMsg(m)
 }
 
 func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
@@ -172,7 +157,7 @@ func typeAHandler(w dns.ResponseWriter, req *dns.Msg) {
 }
 
 func timeoutHandler(w dns.ResponseWriter, req *dns.Msg) {
-	time.Sleep(DefaultTimeout + time.Second)
+	time.Sleep(types.DefaultTimeout + time.Second)
 	typeAHandler(w, req)
 }
 

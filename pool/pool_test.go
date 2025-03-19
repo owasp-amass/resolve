@@ -8,6 +8,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -25,13 +26,13 @@ func initPool(addrstr string) (*Pool, types.Selector, types.Conn) {
 	timeout := 50 * time.Millisecond
 
 	if addrstr == "" {
-		sel = selectors.NewAuthoritative(timeout)
+		sel = selectors.NewAuthoritative(timeout, servers.NewNameserver)
 	} else {
 		sel = selectors.NewRandom()
 		sel.Add(servers.NewNameserver(addrstr, timeout))
 	}
 
-	conns := conn.New(1, sel)
+	conns := conn.New(runtime.NumCPU(), sel)
 	return New(0, sel, conns, nil), sel, conns
 }
 
@@ -52,7 +53,7 @@ func TestPoolQuery(t *testing.T) {
 
 	num := 1000
 	var failures int
-	ch := make(chan *dns.Msg, num)
+	ch := make(chan *dns.Msg, 50)
 	defer close(ch)
 
 	for i := 0; i < num; i++ {
@@ -247,7 +248,7 @@ func TestBadWriteNextMsg(t *testing.T) {
 	conns.Close()
 
 	resp, err := p.Exchange(context.Background(), utils.QueryMsg(name, dns.TypeA))
-	if err == nil && resp.Rcode != servers.RcodeNoResponse {
+	if err == nil && resp.Rcode != types.RcodeNoResponse {
 		t.Errorf("the query did not fail as expected")
 	}
 }

@@ -11,14 +11,18 @@ import (
 
 	"github.com/caffix/stringset"
 	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/types"
 	"github.com/owasp-amass/resolve/utils"
 )
 
 func TestXchgAddRemove(t *testing.T) {
 	name := "caffix.net"
-	xchg := NewXchgMgr(DefaultTimeout)
+	xchg := NewXchgMgr(types.DefaultTimeout)
 	msg := utils.QueryMsg(name, dns.TypeA)
-	req := &request{msg: msg}
+
+	req := types.RequestPool.Get().(types.Request)
+	req.SetMessage(msg)
+
 	if err := xchg.Add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
@@ -47,20 +51,22 @@ func TestXchgRemoveExpired(t *testing.T) {
 
 	for _, name := range names {
 		msg := utils.QueryMsg(name, dns.TypeA)
-		if err := xchg.Add(&request{
-			msg:    msg,
-			sentAt: time.Now(),
-		}); err != nil {
+		req := types.RequestPool.Get().(types.Request)
+		req.SetMessage(msg)
+		req.SetSentAt(time.Now())
+
+		if err := xchg.Add(req); err != nil {
 			t.Errorf("Failed to add the request")
 		}
 	}
 	// Add one request that should not be removed with the others
 	name := "vpn.caffix.net"
 	msg := utils.QueryMsg(name, dns.TypeA)
-	if err := xchg.Add(&request{
-		msg:    msg,
-		sentAt: time.Now().Add(3 * time.Second),
-	}); err != nil {
+	req := types.RequestPool.Get().(types.Request)
+	req.SetMessage(msg)
+	req.SetSentAt(time.Now().Add(3 * time.Second))
+
+	if err := xchg.Add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
 	if len(xchg.RemoveExpired()) > 0 {
@@ -87,7 +93,10 @@ func TestXchgRemoveAll(t *testing.T) {
 
 	for _, name := range names {
 		msg := utils.QueryMsg(name, dns.TypeA)
-		if err := xchg.Add(&request{msg: msg}); err != nil {
+		req := types.RequestPool.Get().(types.Request)
+		req.SetMessage(msg)
+
+		if err := xchg.Add(req); err != nil {
 			t.Errorf("Failed to add the request")
 		}
 	}
