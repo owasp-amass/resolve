@@ -76,15 +76,16 @@ func (r *Conn) next() net.PacketConn {
 	}
 
 	cur := r.nextWrite
+	c := r.conns[cur]
 	r.nextWrite = (r.nextWrite + 1) % len(r.conns)
 
 	r.conns[cur].count++
 	if r.conns[cur].count >= maxWrites {
 		r.conns = append(r.conns[:cur], r.conns[cur+1:]...)
-		go r.delayedClose(r.conns[cur])
+		go r.delayedClose(c)
 	}
 
-	return r.conns[cur].conn
+	return c.conn
 }
 
 func (r *Conn) delayedClose(c *connection) {
