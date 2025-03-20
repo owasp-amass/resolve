@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -34,78 +33,78 @@ type connection struct {
 }
 
 type Conn struct {
-	sync.Mutex
-	done      chan struct{}
-	conns     []*connection
-	sel       types.Selector
-	nextWrite int
+	done    chan struct{}
+	conns   chan *connection
+	expired chan *connection
+	sel     types.Selector
+	cpus    int
 }
 
 func New(cpus int, sel types.Selector) *Conn {
 	conns := &Conn{
 		done: make(chan struct{}),
 		sel:  sel,
+		cpus: cpus,
 	}
 
 	for i := 0; i < cpus; i++ {
-		_ = conns.add()
+		conns.new()
 	}
+
+	go conns.rotations()
 	return conns
 }
 
 func (r *Conn) Close() {
-	r.Lock()
-	defer r.Unlock()
-
-	if r.conns != nil {
-		close(r.done)
-		for _, c := range r.conns {
+	close(r.done)
+first:
+	for i := 0; i < r.cpus; i++ {
+		select {
+		case c := <-r.conns:
 			close(c.done)
 			_ = c.conn.Close()
+		default:
+			break first
 		}
-		r.conns = nil
 	}
+second:
+	for i := 0; i < r.cpus; i++ {
+		select {
+		case c := <-r.expired:
+			close(c.done)
+			_ = c.conn.Close()
+		default:
+			break second
+		}
+	}
+
+	close(r.conns)
+	close(r.expired)
 }
 
-func (r *Conn) next() net.PacketConn {
-	select {
-	case <-r.done:
-		return nil
-	default:
+func (r *Conn) rotations() {
+	for {
+		select {
+		case <-r.done:
+			return
+		case c := <-r.expired:
+			r.new()
+			go r.delayedClose(c)
+		}
 	}
-
-	r.Lock()
-	defer r.Unlock()
-
-	if len(r.conns) == 0 {
-		return nil
-	}
-
-	cur := r.nextWrite
-	c := r.conns[cur]
-
-	c.count++
-	if c.count >= maxWrites {
-		r.conns = append(r.conns[:cur], r.conns[cur+1:]...)
-		go r.delayedClose(c)
-	}
-
-	r.nextWrite = (r.nextWrite + 1) % len(r.conns)
-	return c.conn
 }
 
 func (r *Conn) delayedClose(c *connection) {
-	_ = r.add()
 	time.Sleep(2 * time.Second)
 
 	close(c.done)
 	_ = c.conn.Close()
 }
 
-func (r *Conn) add() error {
+func (r *Conn) new() {
 	conn, err := r.ListenPacket()
 	if err != nil {
-		return err
+		return
 	}
 
 	_ = conn.SetDeadline(time.Time{})
@@ -115,11 +114,7 @@ func (r *Conn) add() error {
 	}
 	go r.responses(c)
 
-	r.Lock()
-	defer r.Unlock()
-
-	r.conns = append(r.conns, c)
-	return nil
+	r.conns <- c
 }
 
 func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
@@ -130,8 +125,16 @@ func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	if out, err = msg.Pack(); err == nil {
 		err = errors.New("failed to obtain a connection")
 
-		if conn := r.next(); conn != nil {
-			if n, err = conn.WriteTo(out, addr); err == nil && n < len(out) {
+		if c := <-r.conns; c != nil {
+			c.count++
+
+			if c.count >= maxWrites {
+				r.expired <- c
+			} else {
+				r.conns <- c
+			}
+
+			if n, err = c.conn.WriteTo(out, addr); err == nil && n < len(out) {
 				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 			}
 		}
