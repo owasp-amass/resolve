@@ -68,6 +68,12 @@ func (r *Conn) Close() {
 }
 
 func (r *Conn) next() net.PacketConn {
+	select {
+	case <-r.done:
+		return nil
+	default:
+	}
+
 	r.Lock()
 	defer r.Unlock()
 
@@ -77,14 +83,14 @@ func (r *Conn) next() net.PacketConn {
 
 	cur := r.nextWrite
 	c := r.conns[cur]
-	r.nextWrite = (r.nextWrite + 1) % len(r.conns)
 
-	r.conns[cur].count++
-	if r.conns[cur].count >= maxWrites {
+	c.count++
+	if c.count >= maxWrites {
 		r.conns = append(r.conns[:cur], r.conns[cur+1:]...)
 		go r.delayedClose(c)
 	}
 
+	r.nextWrite = (r.nextWrite + 1) % len(r.conns)
 	return c.conn
 }
 
@@ -97,9 +103,6 @@ func (r *Conn) delayedClose(c *connection) {
 }
 
 func (r *Conn) add() error {
-	r.Lock()
-	defer r.Unlock()
-
 	conn, err := r.ListenPacket()
 	if err != nil {
 		return err
@@ -111,6 +114,9 @@ func (r *Conn) add() error {
 		done: make(chan struct{}),
 	}
 	go r.responses(c)
+
+	r.Lock()
+	defer r.Unlock()
 
 	r.conns = append(r.conns, c)
 	return nil
