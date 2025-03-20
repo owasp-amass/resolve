@@ -16,7 +16,10 @@ import (
 	"github.com/owasp-amass/resolve/utils"
 )
 
-const headerSize = 12
+const (
+	headerSize = 12
+	maxWrites  = 50
+)
 
 type resp struct {
 	Msg  *dns.Msg
@@ -25,8 +28,9 @@ type resp struct {
 }
 
 type connection struct {
-	conn net.PacketConn
-	done chan struct{}
+	done  chan struct{}
+	conn  net.PacketConn
+	count int
 }
 
 type Conn struct {
@@ -35,14 +39,12 @@ type Conn struct {
 	conns     []*connection
 	sel       types.Selector
 	nextWrite int
-	cpus      int
 }
 
 func New(cpus int, sel types.Selector) *Conn {
 	conns := &Conn{
 		done: make(chan struct{}),
 		sel:  sel,
-		cpus: cpus,
 	}
 
 	for i := 0; i < cpus; i++ {
@@ -75,10 +77,28 @@ func (r *Conn) next() net.PacketConn {
 
 	cur := r.nextWrite
 	r.nextWrite = (r.nextWrite + 1) % len(r.conns)
+
+	r.conns[cur].count++
+	if r.conns[cur].count >= maxWrites {
+		r.conns = append(r.conns[:cur], r.conns[cur+1:]...)
+		go r.delayedClose(r.conns[cur])
+	}
+
 	return r.conns[cur].conn
 }
 
+func (r *Conn) delayedClose(c *connection) {
+	_ = r.add()
+	time.Sleep(2 * time.Second)
+
+	close(c.done)
+	_ = c.conn.Close()
+}
+
 func (r *Conn) add() error {
+	r.Lock()
+	defer r.Unlock()
+
 	conn, err := r.ListenPacket()
 	if err != nil {
 		return err
