@@ -42,9 +42,11 @@ type Conn struct {
 
 func New(cpus int, sel types.Selector) *Conn {
 	conns := &Conn{
-		done: make(chan struct{}),
-		sel:  sel,
-		cpus: cpus,
+		done:    make(chan struct{}),
+		conns:   make(chan *connection, cpus),
+		expired: make(chan *connection, cpus),
+		sel:     sel,
+		cpus:    cpus,
 	}
 
 	for i := 0; i < cpus; i++ {

@@ -28,11 +28,5 @@ func (r *Conn) ListenPacket() (net.PacketConn, error) {
 			return operr
 		},
 	}
-
-	laddr := ":0"
-	if len(r.conns) > 0 {
-		laddr = r.conns[0].conn.LocalAddr().String()
-	}
-
-	return lc.ListenPacket(context.Background(), "udp", laddr)
+	return lc.ListenPacket(context.Background(), "udp", ":0")
 }
