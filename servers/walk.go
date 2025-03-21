@@ -5,7 +5,6 @@
 package servers
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/miekg/dns"
@@ -20,12 +19,6 @@ func (ns *nameserver) NsecTraversal(domain string, conns types.Conn) ([]*dns.NSE
 	var results []*dns.NSEC
 	names := make(map[string]struct{})
 	for next := domain; true; {
-		select {
-		case <-ns.done:
-			return nil, errors.New("the resolver pool has been stopped")
-		default:
-		}
-
 		nsec, err := ns.searchGap(next, conns)
 		if err != nil {
 			return results, err

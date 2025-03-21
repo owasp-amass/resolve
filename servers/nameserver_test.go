@@ -8,6 +8,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -27,22 +28,19 @@ func initPool(addrstr string) (*pool.Pool, types.Selector, types.Conn) {
 	if addrstr == "" {
 		sel = selectors.NewAuthoritative(timeout, NewNameserver)
 	} else {
-		sel = selectors.NewRandom()
-		sel.Add(NewNameserver(addrstr, timeout))
+		sel = selectors.NewSingle(timeout, NewNameserver(addrstr))
 	}
 
-	conns := conn.New(1, sel)
+	conns := conn.New(runtime.NumCPU(), sel)
 	return pool.New(0, sel, conns, nil), sel, conns
 }
 
 func TestNewNameserver(t *testing.T) {
-	timeout := 50 * time.Millisecond
-
-	if ns := newNameserver("192.168.1.1", timeout); ns == nil ||
+	if ns := newNameserver("192.168.1.1"); ns == nil ||
 		ns.Address().IP.String() != "192.168.1.1" || ns.Address().Port != 53 {
 		t.Errorf("failed to add the port to the provided address")
 	}
-	if ns := newNameserver("300.300.300.300", timeout); ns != nil &&
+	if ns := newNameserver("300.300.300.300"); ns != nil &&
 		ns.Address().IP.String() == "300.300.300.300" {
 		t.Errorf("failed to detect the invalid IP address provided")
 	}

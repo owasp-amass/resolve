@@ -28,8 +28,7 @@ func initPool(addrstr string) (*Pool, types.Selector, types.Conn) {
 	if addrstr == "" {
 		sel = selectors.NewAuthoritative(timeout, servers.NewNameserver)
 	} else {
-		sel = selectors.NewRandom()
-		sel.Add(servers.NewNameserver(addrstr, timeout))
+		sel = selectors.NewSingle(timeout, servers.NewNameserver(addrstr))
 	}
 
 	conns := conn.New(runtime.NumCPU(), sel)

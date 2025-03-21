@@ -6,12 +6,20 @@ package selectors
 
 import (
 	"math/rand"
+	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewRandom() *random {
-	return &random{lookup: make(map[string]types.Nameserver)}
+func NewRandom(timeout time.Duration) *random {
+	r := &random{
+		done:    make(chan struct{}, 1),
+		timeout: timeout,
+		lookup:  make(map[string]types.Nameserver),
+	}
+
+	go r.timeouts()
+	return r
 }
 
 // Get performs random selection on the pool of nameservers.
@@ -74,6 +82,8 @@ func (r *random) All() []types.Nameserver {
 }
 
 func (r *random) Close() {
+	close(r.done)
+
 	r.Lock()
 	all := make([]types.Nameserver, 0, len(r.list))
 	_ = copy(all, r.list)
@@ -81,8 +91,36 @@ func (r *random) Close() {
 
 	for _, ns := range all {
 		r.Remove(ns)
+		ns.Close()
 	}
 
 	r.list = nil
 	r.lookup = nil
+}
+
+func (r *random) timeouts() {
+	t := time.NewTimer(r.timeout)
+	defer t.Stop()
+
+	for range t.C {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		r.Lock()
+		cp := make([]types.Nameserver, 0, len(r.list))
+		_ = copy(cp, r.list)
+		r.Unlock()
+
+		for _, ns := range cp {
+			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
+				req.NoResponse()
+				req.Release()
+			}
+		}
+
+		t.Reset(r.timeout)
+	}
 }

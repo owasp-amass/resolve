@@ -14,11 +14,9 @@ import (
 )
 
 type nameserver struct {
-	done    chan struct{}
-	addr    *net.UDPAddr
-	xchgs   *xchgMgr
-	rate    *rateTrack
-	timeout time.Duration
+	addr  *net.UDPAddr
+	xchgs *xchgMgr
+	rate  *rateTrack
 }
 
 type rateTrack struct {
@@ -32,6 +30,5 @@ type rateTrack struct {
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.
 type xchgMgr struct {
 	sync.Mutex
-	timeout time.Duration
-	xchgs   map[string]types.Request
+	xchgs map[string]types.Request
 }

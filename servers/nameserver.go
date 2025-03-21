@@ -7,16 +7,15 @@ package servers
 import (
 	"errors"
 	"net"
-	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewNameserver(addr string, timeout time.Duration) types.Nameserver {
-	return newNameserver(addr, timeout)
+func NewNameserver(addr string) types.Nameserver {
+	return newNameserver(addr)
 }
 
-func newNameserver(addr string, timeout time.Duration) *nameserver {
+func newNameserver(addr string) *nameserver {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		// Add the default port number to the IP address
 		addr = net.JoinHostPort(addr, "53")
@@ -25,13 +24,10 @@ func newNameserver(addr string, timeout time.Duration) *nameserver {
 	var ns *nameserver
 	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
 		ns = &nameserver{
-			done:    make(chan struct{}, 1),
-			xchgs:   NewXchgMgr(timeout),
-			addr:    uaddr,
-			rate:    newRateTrack(),
-			timeout: timeout,
+			xchgs: NewXchgMgr(),
+			addr:  uaddr,
+			rate:  newRateTrack(),
 		}
-		go ns.timeouts()
 	}
 	return ns
 }
@@ -49,13 +45,6 @@ func (ns *nameserver) RateMonitor() types.RateTrack {
 }
 
 func (ns *nameserver) Close() {
-	select {
-	case <-ns.done:
-		return
-	default:
-	}
-	// Send the signal to shutdown and close the connection
-	close(ns.done)
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range ns.xchgs.RemoveAll() {
 		req.NoResponse()
@@ -66,14 +55,6 @@ func (ns *nameserver) Close() {
 func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	if req == nil {
 		return errors.New("the request is nil")
-	}
-
-	select {
-	case <-ns.done:
-		req.NoResponse()
-		req.Release()
-		return errors.New("the nameserver has been closed")
-	default:
 	}
 
 	ns.rate.Take()
@@ -95,24 +76,4 @@ func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 	}
 
 	return ns.xchgs.Add(req)
-}
-
-func (ns *nameserver) timeouts() {
-	t := time.NewTimer(ns.timeout)
-	defer t.Stop()
-
-	for range t.C {
-		select {
-		case <-ns.done:
-			return
-		default:
-		}
-
-		for _, req := range ns.xchgs.RemoveExpired() {
-			req.NoResponse()
-			req.Release()
-		}
-
-		t.Reset(ns.timeout)
-	}
 }

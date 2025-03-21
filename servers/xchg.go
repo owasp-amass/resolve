@@ -13,11 +13,8 @@ import (
 	"github.com/owasp-amass/resolve/utils"
 )
 
-func NewXchgMgr(d time.Duration) *xchgMgr {
-	return &xchgMgr{
-		timeout: d,
-		xchgs:   make(map[string]types.Request),
-	}
+func NewXchgMgr() *xchgMgr {
+	return &xchgMgr{xchgs: make(map[string]types.Request)}
 }
 
 func xchgKey(id uint16, name string) string {
@@ -48,7 +45,7 @@ func (r *xchgMgr) Remove(id uint16, name string) types.Request {
 	return nil
 }
 
-func (r *xchgMgr) RemoveExpired() []types.Request {
+func (r *xchgMgr) RemoveExpired(timeout time.Duration) []types.Request {
 	r.Lock()
 	defer r.Unlock()
 
@@ -57,10 +54,11 @@ func (r *xchgMgr) RemoveExpired() []types.Request {
 	for key, req := range r.xchgs {
 		sent := req.SentAt()
 
-		if !sent.IsZero() && now.After(sent.Add(r.timeout)) {
+		if !sent.IsZero() && now.After(sent.Add(timeout)) {
 			keys = append(keys, key)
 		}
 	}
+
 	return r.Delete(keys)
 }
 
@@ -72,6 +70,7 @@ func (r *xchgMgr) RemoveAll() []types.Request {
 	for key := range r.xchgs {
 		keys = append(keys, key)
 	}
+
 	return r.Delete(keys)
 }
 

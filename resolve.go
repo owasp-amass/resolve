@@ -22,9 +22,9 @@ func NewServerPool(timeout time.Duration, logger *log.Logger, addrs ...string) *
 	if len(addrs) == 0 {
 		sel = selectors.NewAuthoritative(timeout, servers.NewNameserver)
 	} else {
-		sel = selectors.NewRandom()
+		sel = selectors.NewRandom(timeout)
 		for _, addrstr := range addrs {
-			sel.Add(servers.NewNameserver(addrstr, timeout))
+			sel.Add(servers.NewNameserver(addrstr))
 		}
 	}
 

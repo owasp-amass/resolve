@@ -12,17 +12,22 @@ import (
 )
 
 type single struct {
-	server types.Nameserver
+	done    chan struct{}
+	timeout time.Duration
+	server  types.Nameserver
 }
 
 type random struct {
 	sync.Mutex
-	list   []types.Nameserver
-	lookup map[string]types.Nameserver
+	done    chan struct{}
+	timeout time.Duration
+	list    []types.Nameserver
+	lookup  map[string]types.Nameserver
 }
 
 type authoritative struct {
 	sync.Mutex
+	done          chan struct{}
 	timeout       time.Duration
 	newserver     NewServer
 	list          []types.Nameserver

@@ -29,7 +29,7 @@ type RateTrack interface {
 type XchgManager interface {
 	Add(req Request) error
 	Remove(id uint16, name string) Request
-	RemoveExpired() []Request
+	RemoveExpired(timeout time.Duration) []Request
 	RemoveAll() []Request
 	Delete(keys []string) []Request
 }

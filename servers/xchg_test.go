@@ -17,7 +17,7 @@ import (
 
 func TestXchgAddRemove(t *testing.T) {
 	name := "caffix.net"
-	xchg := NewXchgMgr(types.DefaultTimeout)
+	xchg := NewXchgMgr()
 	msg := utils.QueryMsg(name, dns.TypeA)
 
 	req := types.RequestPool.Get().(types.Request)
@@ -46,7 +46,7 @@ func TestXchgAddRemove(t *testing.T) {
 }
 
 func TestXchgRemoveExpired(t *testing.T) {
-	xchg := NewXchgMgr(time.Second)
+	xchg := NewXchgMgr()
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
 	for _, name := range names {
@@ -69,7 +69,7 @@ func TestXchgRemoveExpired(t *testing.T) {
 	if err := xchg.Add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
-	if len(xchg.RemoveExpired()) > 0 {
+	if len(xchg.RemoveExpired(time.Second)) > 0 {
 		t.Errorf("The removeExpired method returned requests too early")
 	}
 
@@ -77,7 +77,7 @@ func TestXchgRemoveExpired(t *testing.T) {
 	set := stringset.New(names...)
 	defer set.Close()
 
-	for _, req := range xchg.RemoveExpired() {
+	for _, req := range xchg.RemoveExpired(time.Second) {
 		name := strings.ToLower(utils.RemoveLastDot(req.Message().Question[0].Name))
 
 		set.Remove(name)
@@ -88,7 +88,7 @@ func TestXchgRemoveExpired(t *testing.T) {
 }
 
 func TestXchgRemoveAll(t *testing.T) {
-	xchg := NewXchgMgr(time.Second)
+	xchg := NewXchgMgr()
 	names := []string{"caffix.net", "www.caffix.net", "blog.caffix.net"}
 
 	for _, name := range names {

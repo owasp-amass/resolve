@@ -166,9 +166,9 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 	if len(list) == 0 {
 		sel = selectors.NewAuthoritative(delay, servers.NewNameserver)
 	} else {
-		sel = selectors.NewRandom()
+		sel = selectors.NewRandom(delay)
 		for _, addrstr := range list {
-			sel.Add(servers.NewNameserver(addrstr, delay))
+			sel.Add(servers.NewNameserver(addrstr))
 		}
 	}
 
@@ -180,8 +180,8 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 			return fmt.Errorf("failed to provide a valid IP address for DNS wildcard detection: %s", detector)
 		}
 
-		serv := servers.NewNameserver(detector, delay)
-		dconns := conn.New(runtime.NumCPU(), selectors.NewSingle(serv))
+		serv := servers.NewNameserver(detector)
+		dconns := conn.New(runtime.NumCPU(), selectors.NewSingle(delay, serv))
 		p.Detector = wildcards.NewDetector(serv, dconns, p.Log)
 	}
 	return nil

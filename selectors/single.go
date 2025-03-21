@@ -5,11 +5,20 @@
 package selectors
 
 import (
+	"time"
+
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewSingle(serv types.Nameserver) *single {
-	return &single{server: serv}
+func NewSingle(timeout time.Duration, serv types.Nameserver) *single {
+	r := &single{
+		done:    make(chan struct{}, 1),
+		timeout: timeout,
+		server:  serv,
+	}
+
+	go r.timeouts()
+	return r
 }
 
 func (r *single) Get(fqdn string) types.Nameserver    { return r.server }
@@ -17,4 +26,29 @@ func (r *single) Lookup(addr string) types.Nameserver { return r.server }
 func (r *single) Add(ns types.Nameserver)             {}
 func (r *single) Remove(ns types.Nameserver)          {}
 func (r *single) All() []types.Nameserver             { return []types.Nameserver{r.server} }
-func (r *single) Close()                              { r.server = nil }
+
+func (r *single) Close() {
+	close(r.done)
+	r.server.Close()
+	r.server = nil
+}
+
+func (r *single) timeouts() {
+	t := time.NewTimer(r.timeout)
+	defer t.Stop()
+
+	for range t.C {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		for _, req := range r.server.XchgManager().RemoveExpired(r.timeout) {
+			req.NoResponse()
+			req.Release()
+		}
+
+		t.Reset(r.timeout)
+	}
+}

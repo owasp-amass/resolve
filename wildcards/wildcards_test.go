@@ -8,6 +8,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -33,10 +34,9 @@ func TestWildcardDetected(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	timeout := 50 * time.Millisecond
-	sel := selectors.NewRandom()
-	serv := servers.NewNameserver(addrstr, timeout)
-	sel.Add(serv)
-	conns := conn.New(1, sel)
+	serv := servers.NewNameserver(addrstr)
+	sel := selectors.NewSingle(timeout, serv)
+	conns := conn.New(runtime.NumCPU(), sel)
 	detector := NewDetector(serv, conns, nil)
 	p := pool.New(0, sel, conns, nil)
 	defer p.Stop()

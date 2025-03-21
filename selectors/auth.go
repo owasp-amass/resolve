@@ -15,7 +15,7 @@ import (
 	"github.com/owasp-amass/resolve/utils"
 )
 
-type NewServer func(addr string, timeout time.Duration) types.Nameserver
+type NewServer func(addr string) types.Nameserver
 
 var rootIPs = []string{
 	"198.41.0.4",
@@ -37,7 +37,7 @@ func RootServers(timeout time.Duration, newserver NewServer) []types.Nameserver 
 	var servs []types.Nameserver
 
 	for _, ip := range rootIPs {
-		if serv := newserver(ip, timeout); serv != nil {
+		if serv := newserver(ip); serv != nil {
 			servs = append(servs, serv)
 		}
 	}
@@ -47,6 +47,7 @@ func RootServers(timeout time.Duration, newserver NewServer) []types.Nameserver 
 
 func NewAuthoritative(timeout time.Duration, newserver NewServer) *authoritative {
 	auth := &authoritative{
+		done:          make(chan struct{}, 1),
 		timeout:       timeout,
 		newserver:     newserver,
 		lookup:        make(map[string]types.Nameserver),
@@ -62,6 +63,8 @@ func NewAuthoritative(timeout time.Duration, newserver NewServer) *authoritative
 		auth.list = append(auth.list, ns)
 		auth.roots = append(auth.roots, ns)
 	}
+
+	go auth.timeouts()
 	return auth
 }
 
@@ -143,6 +146,8 @@ func (r *authoritative) All() []types.Nameserver {
 }
 
 func (r *authoritative) Close() {
+	close(r.done)
+
 	r.Lock()
 	all := make([]types.Nameserver, 0, len(r.list))
 	_ = copy(all, r.list)
@@ -150,6 +155,7 @@ func (r *authoritative) Close() {
 
 	for _, ns := range all {
 		r.Remove(ns)
+		ns.Close()
 	}
 
 	r.list = nil
@@ -263,7 +269,7 @@ func (r *authoritative) serverNameToResolverObj(server string, ns types.Nameserv
 			for _, rr := range utils.AnswersByType(m, dns.TypeA) {
 				if record, ok := rr.(*dns.A); ok {
 					ip := net.JoinHostPort(record.A.String(), "53")
-					return r.newserver(ip, r.timeout)
+					return r.newserver(ip)
 				}
 			}
 			break
@@ -293,6 +299,33 @@ func (r *authoritative) getNameServers(fqdn string, ns types.Nameserver) []strin
 		}
 	}
 	return servers
+}
+
+func (r *authoritative) timeouts() {
+	t := time.NewTimer(r.timeout)
+	defer t.Stop()
+
+	for range t.C {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		r.Lock()
+		cp := make([]types.Nameserver, 0, len(r.list))
+		_ = copy(cp, r.list)
+		r.Unlock()
+
+		for _, ns := range cp {
+			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
+				req.NoResponse()
+				req.Release()
+			}
+		}
+
+		t.Reset(r.timeout)
+	}
 }
 
 func pickOneServer(servers []types.Nameserver) types.Nameserver {

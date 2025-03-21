@@ -5,6 +5,7 @@
 package servers
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -118,10 +119,9 @@ func TestNsecTraversal(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	timeout := 50 * time.Millisecond
-	sel := selectors.NewRandom()
-	serv := NewNameserver(addrstr, timeout)
-	sel.Add(serv)
-	conns := conn.New(1, sel)
+	serv := NewNameserver(addrstr)
+	sel := selectors.NewSingle(timeout, serv)
+	conns := conn.New(runtime.NumCPU(), sel)
 	defer serv.Close()
 	defer sel.Close()
 	defer conns.Close()
@@ -159,10 +159,9 @@ func TestBadNsecTraversal(t *testing.T) {
 	defer func() { _ = s.Shutdown() }()
 
 	timeout := 50 * time.Millisecond
-	sel := selectors.NewRandom()
-	serv := NewNameserver(addrstr, timeout)
-	sel.Add(serv)
-	conns := conn.New(1, sel)
+	serv := NewNameserver(addrstr)
+	sel := selectors.NewSingle(timeout, serv)
+	conns := conn.New(runtime.NumCPU(), sel)
 	defer serv.Close()
 	defer sel.Close()
 	defer conns.Close()
