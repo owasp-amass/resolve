@@ -93,9 +93,9 @@ func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 		return err
 	}
 
-	msg := req.Message().Copy()
-	req.SetSentAt(time.Now())
-	if err := conns.WriteMsg(msg, ns.addr); err != nil {
+	if err := conns.WriteMsg(req, ns.addr); err != nil {
+		msg := req.Message()
+
 		_ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
 		req.NoResponse()
 		req.Release()

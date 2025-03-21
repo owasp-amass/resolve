@@ -14,7 +14,7 @@ import (
 
 const (
 	minLimit            = 1
-	maxLimit            = 10
+	maxLimit            = 15
 	minUpdateSampleSize = 10
 	maxInterval         = time.Second
 )

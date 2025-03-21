@@ -7,6 +7,7 @@ package conn
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 const (
 	headerSize = 12
 	maxWrites  = 50
+	maxJitter  = 10
 )
 
 type resp struct {
@@ -109,21 +111,24 @@ func (r *Conn) new() {
 		return
 	}
 
+	jitter := rand.Intn(maxJitter) + 1
 	_ = conn.SetDeadline(time.Time{})
 	c := &connection{
-		conn: conn,
-		done: make(chan struct{}),
+		done:  make(chan struct{}),
+		conn:  conn,
+		count: jitter,
 	}
 	go r.responses(c)
 
 	r.conns <- c
 }
 
-func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
+func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 	var n int
 	var err error
 	var out []byte
 
+	msg := req.Message().Copy()
 	if out, err = msg.Pack(); err == nil {
 		err = errors.New("failed to obtain a connection")
 
@@ -136,6 +141,7 @@ func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 				r.conns <- c
 			}
 
+			req.SetSentAt(time.Now())
 			if n, err = c.conn.WriteTo(out, addr); err == nil && n < len(out) {
 				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 			}
@@ -156,8 +162,8 @@ func (r *Conn) responses(c *connection) {
 
 		if n, addr, err := c.conn.ReadFrom(b); err == nil && n >= headerSize {
 			at := time.Now()
-			m := new(dns.Msg)
 
+			m := new(dns.Msg)
 			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
 				go r.processResponse(&resp{
 					Msg:  m,
