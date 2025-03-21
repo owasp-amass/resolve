@@ -106,7 +106,7 @@ func (r *Conn) delayedClose(c *connection) {
 }
 
 func (r *Conn) new() {
-	conn, err := r.ListenPacket()
+	conn, err := net.ListenPacket("udp", ":0")
 	if err != nil {
 		return
 	}
