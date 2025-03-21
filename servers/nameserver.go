@@ -77,31 +77,24 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	}
 
 	ns.rate.Take()
-	return ns.writeReq(req, conns)
-}
-
-func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
-	if conns == nil {
-		req.NoResponse()
-		req.Release()
-		return errors.New("the connection is nil")
-	}
-
-	if err := ns.xchgs.Add(req); err != nil {
-		req.NoResponse()
-		req.Release()
-		return err
-	}
-
-	if err := conns.WriteMsg(req, ns.addr); err != nil {
-		msg := req.Message()
-
-		_ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
+	if err := ns.writeReq(req, conns); err != nil {
 		req.NoResponse()
 		req.Release()
 		return err
 	}
 	return nil
+}
+
+func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
+	if conns == nil {
+		return errors.New("the connection is nil")
+	}
+
+	if err := conns.WriteMsg(req, ns.addr); err != nil {
+		return err
+	}
+
+	return ns.xchgs.Add(req)
 }
 
 func (ns *nameserver) timeouts() {
