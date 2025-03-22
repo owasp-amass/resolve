@@ -143,7 +143,10 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 		r.conns <- c
 	}
 
-	req.SetSentAt(time.Now())
+	now := time.Now()
+	req.SetSentAt(now)
+	_ = c.conn.SetWriteDeadline(now.Add(2 * time.Second))
+
 	n, err := c.conn.WriteTo(out, addr)
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
