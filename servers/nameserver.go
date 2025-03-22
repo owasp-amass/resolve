@@ -76,6 +76,7 @@ func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 	}
 
 	if err := conns.WriteMsg(req, ns.addr); err != nil {
+		_ = ns.xchgs.Remove(req.Message().Id, req.Message().Question[0].Name)
 		return err
 	}
 	return nil

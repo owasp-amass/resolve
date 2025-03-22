@@ -40,7 +40,9 @@ func (r *xchgMgr) Remove(id uint16, name string) types.Request {
 
 	key := xchgKey(id, name)
 	if _, found := r.xchgs[key]; found {
-		return r.Delete([]string{key})[0]
+		if reqs := r.Delete([]string{key}); len(reqs) > 0 {
+			return reqs[0]
+		}
 	}
 	return nil
 }
@@ -76,10 +78,11 @@ func (r *xchgMgr) Delete(keys []string) []types.Request {
 	var removed []types.Request
 
 	for _, k := range keys {
-		removed = append(removed, r.xchgs[k])
-		r.xchgs[k] = nil
-		delete(r.xchgs, k)
+		if req, found := r.xchgs[k]; found {
+			removed = append(removed, req)
+			r.xchgs[k] = nil
+			delete(r.xchgs, k)
+		}
 	}
-
 	return removed
 }
