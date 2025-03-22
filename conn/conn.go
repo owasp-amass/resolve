@@ -124,28 +124,29 @@ func (r *Conn) new() {
 }
 
 func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
-	var n int
-	var err error
-	var out []byte
-
 	msg := req.Message().Copy()
-	if out, err = msg.Pack(); err == nil {
-		err = errors.New("failed to obtain a connection")
 
-		if c := <-r.conns; c != nil {
-			c.count++
+	out, err := msg.Pack()
+	if err != nil {
+		return err
+	}
 
-			if c.count >= maxWrites {
-				r.expired <- c
-			} else {
-				r.conns <- c
-			}
+	c := <-r.conns
+	if c == nil {
+		return errors.New("no available connections")
+	}
 
-			req.SetSentAt(time.Now())
-			if n, err = c.conn.WriteTo(out, addr); err == nil && n < len(out) {
-				err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
-			}
-		}
+	c.count++
+	if c.count >= maxWrites {
+		r.expired <- c
+	} else {
+		r.conns <- c
+	}
+
+	req.SetSentAt(time.Now())
+	n, err := c.conn.WriteTo(out, addr)
+	if err == nil && n < len(out) {
+		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 	}
 	return err
 }
@@ -190,7 +191,7 @@ func (r *Conn) processResponse(response *resp) {
 		req.SetRecvAt(response.At)
 
 		if req.Response().Truncated {
-			utils.TCPExchange(req, 2*time.Second)
+			utils.TCPExchange(req, 3*time.Second)
 		} else {
 			req.ResultChan() <- req.Response()
 			rtt := req.RecvAt().Sub(req.SentAt())

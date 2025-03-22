@@ -52,9 +52,7 @@ func (r *xchgMgr) RemoveExpired(timeout time.Duration) []types.Request {
 	now := time.Now()
 	var keys []string
 	for key, req := range r.xchgs {
-		sent := req.SentAt()
-
-		if !sent.IsZero() && now.After(sent.Add(timeout)) {
+		if sent := req.SentAt(); !sent.IsZero() && now.After(sent.Add(timeout)) {
 			keys = append(keys, key)
 		}
 	}
@@ -82,5 +80,6 @@ func (r *xchgMgr) Delete(keys []string) []types.Request {
 		r.xchgs[k] = nil
 		delete(r.xchgs, k)
 	}
+
 	return removed
 }

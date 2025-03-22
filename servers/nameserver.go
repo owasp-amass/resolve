@@ -71,9 +71,12 @@ func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 		return errors.New("the connection is nil")
 	}
 
-	if err := conns.WriteMsg(req, ns.addr); err != nil {
+	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
 
-	return ns.xchgs.Add(req)
+	if err := conns.WriteMsg(req, ns.addr); err != nil {
+		return err
+	}
+	return nil
 }
