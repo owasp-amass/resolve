@@ -132,16 +132,13 @@ func (r *Conn) getConnection() *connection {
 	case <-r.done:
 		return nil
 	case <-t.C:
-		n := r.new()
-		r.putConnection(n)
-		return n
-	case c = <-r.conns:
-	}
-
-	c.count++
-	if c.Expired() {
-		go r.delayedClose(c)
 		c = r.new()
+	case c = <-r.conns:
+		c.count++
+		if c.Expired() {
+			go r.delayedClose(c)
+			c = r.new()
+		}
 	}
 
 	r.putConnection(c)
@@ -157,6 +154,11 @@ func (r *Conn) putConnection(c *connection) {
 }
 
 func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
+	select {
+	case <-r.done:
+		return errors.New("the connection pool has been closed")
+	default:
+	}
 	msg := req.Message().Copy()
 
 	out, err := msg.Pack()
