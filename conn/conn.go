@@ -37,65 +37,39 @@ type connection struct {
 }
 
 type Conn struct {
-	done    chan struct{}
-	conns   chan *connection
-	expired chan *connection
-	sel     types.Selector
-	cpus    int
+	done  chan struct{}
+	conns chan *connection
+	sel   types.Selector
+	cpus  int
 }
 
 func New(cpus int, sel types.Selector) *Conn {
 	conns := &Conn{
-		done:    make(chan struct{}),
-		conns:   make(chan *connection, cpus),
-		expired: make(chan *connection, cpus),
-		sel:     sel,
-		cpus:    cpus,
+		done:  make(chan struct{}),
+		conns: make(chan *connection, cpus),
+		sel:   sel,
+		cpus:  cpus,
 	}
 
 	for i := 0; i < cpus; i++ {
-		conns.new()
+		if c := conns.new(); c != nil {
+			conns.putConnection(c)
+		}
 	}
-
-	go conns.rotations()
 	return conns
 }
 
 func (r *Conn) Close() {
 	close(r.done)
-first:
+	defer close(r.conns)
+loop:
 	for i := 0; i < r.cpus; i++ {
 		select {
 		case c := <-r.conns:
 			close(c.done)
 			_ = c.conn.Close()
 		default:
-			break first
-		}
-	}
-second:
-	for i := 0; i < r.cpus; i++ {
-		select {
-		case c := <-r.expired:
-			close(c.done)
-			_ = c.conn.Close()
-		default:
-			break second
-		}
-	}
-
-	close(r.conns)
-	close(r.expired)
-}
-
-func (r *Conn) rotations() {
-	for {
-		select {
-		case <-r.done:
-			return
-		case c := <-r.expired:
-			go r.new()
-			go r.delayedClose(c)
+			break loop
 		}
 	}
 }
@@ -107,7 +81,7 @@ func (r *Conn) delayedClose(c *connection) {
 	_ = c.conn.Close()
 }
 
-func (r *Conn) new() {
+func (r *Conn) new() *connection {
 	var err error
 	var conn net.PacketConn
 
@@ -127,9 +101,39 @@ func (r *Conn) new() {
 		count:     jitter,
 		createdAt: time.Now(),
 	}
-	go r.responses(c)
 
-	r.conns <- c
+	go r.responses(c)
+	return c
+}
+
+func (r *Conn) getConnection() *connection {
+	var c *connection
+	t := time.NewTimer(2 * time.Second)
+	defer t.Stop()
+
+	select {
+	case <-r.done:
+		return nil
+	case c = <-r.conns:
+	case <-t.C:
+		return nil
+	}
+
+	c.count++
+	if c.count >= maxWrites && time.Since(c.createdAt) > expiredAt {
+		r.new()
+		go r.delayedClose(c)
+	}
+
+	return c
+}
+
+func (r *Conn) putConnection(c *connection) {
+	select {
+	case r.conns <- c:
+	default:
+		go r.delayedClose(c)
+	}
 }
 
 func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
@@ -140,17 +144,11 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 		return err
 	}
 
-	c := <-r.conns
+	c := r.getConnection()
 	if c == nil {
-		return errors.New("no available connections")
+		return errors.New("failed to obtain a connection")
 	}
-
-	c.count++
-	if c.count >= maxWrites && time.Since(c.createdAt) > expiredAt {
-		r.expired <- c
-	} else {
-		r.conns <- c
-	}
+	defer r.putConnection(c)
 
 	now := time.Now()
 	req.SetSentAt(now)
