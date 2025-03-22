@@ -36,6 +36,20 @@ type connection struct {
 	count     int
 }
 
+func (c *connection) Close() {
+	select {
+	case <-c.done:
+		return
+	default:
+		close(c.done)
+		_ = c.conn.Close()
+	}
+}
+
+func (c *connection) Expired() bool {
+	return c.count >= maxWrites && time.Since(c.createdAt) > expiredAt
+}
+
 type Conn struct {
 	done  chan struct{}
 	conns chan *connection
@@ -66,8 +80,7 @@ loop:
 	for i := 0; i < r.cpus; i++ {
 		select {
 		case c := <-r.conns:
-			close(c.done)
-			_ = c.conn.Close()
+			c.Close()
 		default:
 			break loop
 		}
@@ -82,14 +95,7 @@ func (r *Conn) delayedClose(c *connection) {
 	}
 
 	time.Sleep(2 * time.Second)
-
-	select {
-	case <-c.done:
-		return
-	default:
-		close(c.done)
-		_ = c.conn.Close()
-	}
+	c.Close()
 }
 
 func (r *Conn) new() *connection {
@@ -119,23 +125,26 @@ func (r *Conn) new() *connection {
 
 func (r *Conn) getConnection() *connection {
 	var c *connection
-	t := time.NewTimer(2 * time.Second)
+	t := time.NewTimer(time.Second)
 	defer t.Stop()
 
 	select {
 	case <-r.done:
 		return nil
-	case c = <-r.conns:
 	case <-t.C:
-		return nil
+		n := r.new()
+		r.putConnection(n)
+		return n
+	case c = <-r.conns:
 	}
 
 	c.count++
-	if c.count >= maxWrites && time.Since(c.createdAt) > expiredAt {
-		r.new()
+	if c.Expired() {
 		go r.delayedClose(c)
+		c = r.new()
 	}
 
+	r.putConnection(c)
 	return c
 }
 
@@ -159,7 +168,6 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 	if c == nil {
 		return errors.New("failed to obtain a connection")
 	}
-	defer r.putConnection(c)
 
 	now := time.Now()
 	req.SetSentAt(now)
