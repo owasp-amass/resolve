@@ -20,6 +20,7 @@ const (
 	headerSize = 12
 	maxWrites  = 50
 	maxJitter  = 10
+	expiredAt  = 5 * time.Second
 )
 
 type resp struct {
@@ -29,9 +30,10 @@ type resp struct {
 }
 
 type connection struct {
-	done  chan struct{}
-	conn  net.PacketConn
-	count int
+	done      chan struct{}
+	conn      net.PacketConn
+	createdAt time.Time
+	count     int
 }
 
 type Conn struct {
@@ -92,7 +94,7 @@ func (r *Conn) rotations() {
 		case <-r.done:
 			return
 		case c := <-r.expired:
-			r.new()
+			go r.new()
 			go r.delayedClose(c)
 		}
 	}
@@ -106,17 +108,24 @@ func (r *Conn) delayedClose(c *connection) {
 }
 
 func (r *Conn) new() {
-	conn, err := net.ListenPacket("udp", ":0")
-	if err != nil {
-		return
+	var err error
+	var conn net.PacketConn
+
+	for {
+		conn, err = net.ListenPacket("udp", ":0")
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
 	}
 
 	jitter := rand.Intn(maxJitter) + 1
 	_ = conn.SetDeadline(time.Time{})
 	c := &connection{
-		done:  make(chan struct{}),
-		conn:  conn,
-		count: jitter,
+		done:      make(chan struct{}),
+		conn:      conn,
+		count:     jitter,
+		createdAt: time.Now(),
 	}
 	go r.responses(c)
 
@@ -137,7 +146,7 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 	}
 
 	c.count++
-	if c.count >= maxWrites {
+	if c.count >= maxWrites && time.Since(c.createdAt) > expiredAt {
 		r.expired <- c
 	} else {
 		r.conns <- c
