@@ -75,10 +75,21 @@ loop:
 }
 
 func (r *Conn) delayedClose(c *connection) {
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+
 	time.Sleep(2 * time.Second)
 
-	close(c.done)
-	_ = c.conn.Close()
+	select {
+	case <-c.done:
+		return
+	default:
+		close(c.done)
+		_ = c.conn.Close()
+	}
 }
 
 func (r *Conn) new() *connection {
