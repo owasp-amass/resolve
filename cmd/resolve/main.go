@@ -68,7 +68,7 @@ func main() {
 	}
 	defer p.Pool.Stop()
 	// Begin reading DNS names from input
-	p.Requests = make(chan string, p.QPS)
+	p.Requests = make(chan string, 500)
 	go InputDomainNames(p.Input, p.Requests)
 
 	EventLoop(p)
@@ -191,16 +191,18 @@ func EventLoop(p *params) {
 	var avg float32 = 1.0
 	var count, persec, processing int
 	finished := queue.NewQueue()
-	responses := make(chan *dns.Msg, p.QPS*2)
-	queries := make(map[string]int, p.QPS)
+	responses := make(chan *dns.Msg, 500)
+	queries := make(map[string]int, 500)
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-t.C:
-			p.Log.Printf("Resolved %d DNS names that averaged %.2f query attempts\n", persec, avg)
-			avg, persec = 1.0, 0
+			if e, ok := finished.Next(); ok && e != nil {
+				processing--
+				fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+			}
 		case name := <-p.Requests:
 			count += len(p.Qtypes)
 			sendInitialRequests(context.Background(), name, queries, responses, p)
@@ -226,12 +228,13 @@ func EventLoop(p *params) {
 			delete(queries, k)
 		case <-finished.Signal():
 			if e, ok := finished.Next(); ok && e != nil {
+				processing--
 				fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
 			}
-			processing--
 		}
 		// Have all the queries been handled?
 		if count == 0 && processing == 0 && len(queries) == 0 {
+			p.Log.Printf("Resolved %d DNS names that averaged %.2f query attempts\n", persec, avg)
 			return
 		}
 	}

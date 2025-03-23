@@ -23,7 +23,7 @@ func RemoveLastDot(name string) string {
 func QueryMsg(name string, qtype uint16) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(name), qtype)
-	m.Extra = append(m.Extra, SetupOptions())
+	//m.Extra = append(m.Extra, SetupOptions())
 	return m
 }
 

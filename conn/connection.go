@@ -59,19 +59,8 @@ func (c *connection) close() {
 }
 
 func (c *connection) delayedClose() {
-	select {
-	case <-c.done:
-		return
-	default:
-	}
-
 	time.Sleep(2 * time.Second)
-
-	select {
-	case <-c.done:
-	default:
-		c.close()
-	}
+	c.close()
 }
 
 func (c *connection) expired() bool {
@@ -120,17 +109,14 @@ func (c *connection) processResponse(response *resp) {
 	msg := response.Msg
 	name := msg.Question[0].Name
 	if req := serv.XchgManager().Remove(msg.Id, name); req != nil {
-		req.SetResponse(msg)
-		req.SetRecvAt(response.At)
-
-		if req.Response().Truncated {
+		if msg.Truncated {
 			utils.TCPExchange(req, 3*time.Second)
 		} else {
-			rtt := req.RecvAt().Sub(req.SentAt())
+			rtt := response.At.Sub(req.SentAt())
 			req.Server().RateMonitor().ReportRTT(rtt)
 
 			select {
-			case req.ResultChan() <- req.Response():
+			case req.ResultChan() <- msg:
 				req.Release()
 			default:
 			}

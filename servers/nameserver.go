@@ -7,6 +7,7 @@ package servers
 import (
 	"errors"
 	"net"
+	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
@@ -24,8 +25,8 @@ func newNameserver(addr string) *nameserver {
 	var ns *nameserver
 	if uaddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
 		ns = &nameserver{
-			xchgs: NewXchgMgr(),
 			addr:  uaddr,
+			xchgs: NewXchgMgr(),
 			rate:  newRateTrack(),
 		}
 	}
@@ -56,28 +57,18 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	if req == nil {
 		return errors.New("the request is nil")
 	}
-
-	ns.rate.Take()
-	if err := ns.writeReq(req, conns); err != nil {
-		req.NoResponse()
-		req.Release()
-		return err
-	}
-	return nil
-}
-
-func (ns *nameserver) writeReq(req types.Request, conns types.Conn) error {
 	if conns == nil {
 		return errors.New("the connection is nil")
 	}
 
+	ns.rate.Take()
+	req.SetSentAt(time.Now())
+	msg := req.Message().Copy()
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
 
-	if err := conns.WriteMsg(req, ns.addr); err != nil {
-		msg := req.Message()
-
+	if err := conns.WriteMsg(msg, ns.addr); err != nil {
 		_ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
 		return err
 	}

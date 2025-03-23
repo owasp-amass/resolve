@@ -10,6 +10,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
 )
 
@@ -83,13 +84,12 @@ func (r *Conn) putConnection(c *connection) {
 	}
 }
 
-func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
+func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	select {
 	case <-r.done:
 		return errors.New("the connection pool has been closed")
 	default:
 	}
-	msg := req.Message().Copy()
 
 	out, err := msg.Pack()
 	if err != nil {
@@ -101,10 +101,7 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 		return errors.New("failed to obtain a connection")
 	}
 
-	now := time.Now()
-	req.SetSentAt(now)
-
-	_ = c.conn.SetWriteDeadline(now.Add(2 * time.Second))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	n, err := c.conn.WriteTo(out, addr)
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))

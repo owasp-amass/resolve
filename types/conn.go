@@ -6,9 +6,11 @@ package types
 
 import (
 	"net"
+
+	"github.com/miekg/dns"
 )
 
 type Conn interface {
 	Close()
-	WriteMsg(req Request, addr net.Addr) error
+	WriteMsg(msg *dns.Msg, addr net.Addr) error
 }
