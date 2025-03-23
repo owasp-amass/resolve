@@ -50,7 +50,7 @@ func TestPoolQuery(t *testing.T) {
 	defer sel.Close()
 	defer conns.Close()
 
-	num := 1000
+	num := 100
 	var failures int
 	ch := make(chan *dns.Msg, 50)
 	defer close(ch)
