@@ -52,7 +52,6 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 func (c *connection) close() {
 	select {
 	case <-c.done:
-		return
 	default:
 		close(c.done)
 		_ = c.conn.Close()
@@ -67,7 +66,12 @@ func (c *connection) delayedClose() {
 	}
 
 	time.Sleep(2 * time.Second)
-	c.close()
+
+	select {
+	case <-c.done:
+	default:
+		c.close()
+	}
 }
 
 func (c *connection) expired() bool {
@@ -122,13 +126,14 @@ func (c *connection) processResponse(response *resp) {
 		if req.Response().Truncated {
 			utils.TCPExchange(req, 3*time.Second)
 		} else {
-			select {
-			case req.ResultChan() <- req.Response():
-			default:
-			}
 			rtt := req.RecvAt().Sub(req.SentAt())
 			req.Server().RateMonitor().ReportRTT(rtt)
-			req.Release()
+
+			select {
+			case req.ResultChan() <- req.Response():
+				req.Release()
+			default:
+			}
 		}
 	}
 }

@@ -65,11 +65,7 @@ func (r *Conn) getConnection() *connection {
 		c.count++
 		if c.expired() {
 			go c.delayedClose()
-			go func() {
-				if n := newConnection(r.sel.Lookup); n != nil {
-					r.putConnection(n)
-				}
-			}()
+			c = newConnection(r.sel.Lookup)
 		}
 	}
 
