@@ -5,6 +5,7 @@
 package conn
 
 import (
+	"math/rand"
 	"net"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 )
 
 const (
+	maxJitter  = 10
 	headerSize = 12
 	maxWrites  = 50
 	expiredAt  = 5 * time.Second
@@ -25,6 +27,26 @@ type connection struct {
 	createdAt time.Time
 	count     int
 	lookup    func(addr string) types.Nameserver
+}
+
+func newConnection(lookup func(addr string) types.Nameserver) *connection {
+	conn, err := net.ListenPacket("udp", ":0")
+	if err != nil || conn == nil {
+		return nil
+	}
+
+	jitter := rand.Intn(maxJitter) + 1
+	_ = conn.SetDeadline(time.Time{})
+	c := &connection{
+		done:      make(chan struct{}),
+		conn:      conn,
+		count:     jitter,
+		createdAt: time.Now(),
+		lookup:    lookup,
+	}
+
+	go c.responses()
+	return c
 }
 
 func (c *connection) close() {

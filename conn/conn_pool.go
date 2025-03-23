@@ -7,14 +7,11 @@ package conn
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
-
-const maxJitter = 10
 
 type Conn struct {
 	done  chan struct{}
@@ -32,7 +29,7 @@ func New(cpus int, sel types.Selector) *Conn {
 	}
 
 	for i := 0; i < cpus; {
-		if c := conns.new(); c != nil {
+		if c := newConnection(sel.Lookup); c != nil {
 			i++
 			conns.putConnection(c)
 		}
@@ -54,26 +51,6 @@ loop:
 	}
 }
 
-func (r *Conn) new() *connection {
-	conn, err := net.ListenPacket("udp", ":0")
-	if err != nil || conn == nil {
-		return nil
-	}
-
-	jitter := rand.Intn(maxJitter) + 1
-	_ = conn.SetDeadline(time.Time{})
-	c := &connection{
-		done:      make(chan struct{}),
-		conn:      conn,
-		count:     jitter,
-		createdAt: time.Now(),
-		lookup:    r.sel.Lookup,
-	}
-
-	go c.responses()
-	return c
-}
-
 func (r *Conn) getConnection() *connection {
 	var c *connection
 	t := time.NewTimer(time.Second)
@@ -83,12 +60,16 @@ func (r *Conn) getConnection() *connection {
 	case <-r.done:
 		return nil
 	case <-t.C:
-		c = r.new()
+		c = newConnection(r.sel.Lookup)
 	case c = <-r.conns:
 		c.count++
 		if c.expired() {
 			go c.delayedClose()
-			c = r.new()
+			go func() {
+				if n := newConnection(r.sel.Lookup); n != nil {
+					r.putConnection(n)
+				}
+			}()
 		}
 	}
 
@@ -126,8 +107,8 @@ func (r *Conn) WriteMsg(req types.Request, addr net.Addr) error {
 
 	now := time.Now()
 	req.SetSentAt(now)
-	_ = c.conn.SetWriteDeadline(now.Add(2 * time.Second))
 
+	_ = c.conn.SetWriteDeadline(now.Add(2 * time.Second))
 	n, err := c.conn.WriteTo(out, addr)
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
