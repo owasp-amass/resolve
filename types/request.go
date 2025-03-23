@@ -140,7 +140,11 @@ func (r *request) NoResponse() {
 	if r.msg != nil {
 		r.msg.Rcode = RcodeNoResponse
 	}
-	r.result <- r.msg
+
+	select {
+	case r.result <- r.msg:
+	default:
+	}
 }
 
 func (r *request) Release() {

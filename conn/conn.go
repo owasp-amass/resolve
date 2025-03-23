@@ -224,7 +224,10 @@ func (r *Conn) processResponse(response *resp) {
 		if req.Response().Truncated {
 			utils.TCPExchange(req, 3*time.Second)
 		} else {
-			req.ResultChan() <- req.Response()
+			select {
+			case req.ResultChan() <- req.Response():
+			default:
+			}
 			rtt := req.RecvAt().Sub(req.SentAt())
 			req.Server().RateMonitor().ReportRTT(rtt)
 			req.Release()
