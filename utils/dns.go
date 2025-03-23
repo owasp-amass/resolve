@@ -20,7 +20,7 @@ func TCPExchange(req types.Request, timeout time.Duration) {
 	release := true
 	if m, _, err := client.Exchange(req.Message(), req.Server().Address().String()); err == nil {
 		select {
-		case req.ResultChan() <- m:
+		case req.RespChan() <- m:
 		default:
 			release = false
 		}

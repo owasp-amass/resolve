@@ -22,14 +22,10 @@ type Request interface {
 	SetServer(s Nameserver)
 	SentAt() time.Time
 	SetSentAt(t time.Time)
-	RecvAt() time.Time
-	SetRecvAt(t time.Time)
 	Message() *dns.Msg
 	SetMessage(m *dns.Msg)
-	Response() *dns.Msg
-	SetResponse(m *dns.Msg)
-	ResultChan() chan *dns.Msg
-	SetResultChan(c chan *dns.Msg)
+	RespChan() chan *dns.Msg
+	SetRespChan(c chan *dns.Msg)
 	NoResponse()
 	Release()
 }
@@ -42,11 +38,10 @@ var RequestPool = sync.Pool{
 
 type request struct {
 	sync.Mutex
-	serv      Nameserver
-	sentAt    time.Time
-	recvAt    time.Time
-	msg, resp *dns.Msg
-	result    chan *dns.Msg
+	serv   Nameserver
+	sentAt time.Time
+	msg    *dns.Msg
+	resp   chan *dns.Msg
 }
 
 func (r *request) Server() Nameserver {
@@ -77,20 +72,6 @@ func (r *request) SetSentAt(t time.Time) {
 	r.sentAt = t
 }
 
-func (r *request) RecvAt() time.Time {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.recvAt
-}
-
-func (r *request) SetRecvAt(t time.Time) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.recvAt = t
-}
-
 func (r *request) Message() *dns.Msg {
 	r.Lock()
 	defer r.Unlock()
@@ -105,32 +86,18 @@ func (r *request) SetMessage(m *dns.Msg) {
 	r.msg = m
 }
 
-func (r *request) Response() *dns.Msg {
+func (r *request) RespChan() chan *dns.Msg {
 	r.Lock()
 	defer r.Unlock()
 
 	return r.resp
 }
 
-func (r *request) SetResponse(m *dns.Msg) {
+func (r *request) SetRespChan(c chan *dns.Msg) {
 	r.Lock()
 	defer r.Unlock()
 
-	r.resp = m
-}
-
-func (r *request) ResultChan() chan *dns.Msg {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.result
-}
-
-func (r *request) SetResultChan(c chan *dns.Msg) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.result = c
+	r.resp = c
 }
 
 func (r *request) NoResponse() {
@@ -143,7 +110,7 @@ func (r *request) NoResponse() {
 	r.msg.Rcode = RcodeNoResponse
 
 	select {
-	case r.result <- r.msg:
+	case r.resp <- r.msg:
 	default:
 	}
 }

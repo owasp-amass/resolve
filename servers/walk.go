@@ -48,8 +48,13 @@ func (ns *nameserver) searchGap(name string, conns types.Conn) (*dns.NSEC, error
 		req := types.RequestPool.Get().(types.Request)
 		req.SetServer(ns)
 		req.SetMessage(msg)
-		req.SetResultChan(ch)
-		_ = ns.SendRequest(req, conns)
+		req.SetRespChan(ch)
+
+		if err := ns.SendRequest(req, conns); err != nil {
+			req.NoResponse()
+			req.Release()
+			continue
+		}
 
 		resp := <-ch
 		if resp.Rcode == dns.RcodeNameError {

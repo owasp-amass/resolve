@@ -69,7 +69,7 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	default:
 		if req := types.RequestPool.Get().(types.Request); req != nil {
 			req.SetMessage(msg)
-			req.SetResultChan(ch)
+			req.SetRespChan(ch)
 			go r.processSingleReq(req)
 			return
 		}

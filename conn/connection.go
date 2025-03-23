@@ -5,7 +5,6 @@
 package conn
 
 import (
-	"math/rand"
 	"net"
 	"time"
 
@@ -14,19 +13,12 @@ import (
 	"github.com/owasp-amass/resolve/utils"
 )
 
-const (
-	maxJitter  = 10
-	headerSize = 12
-	maxWrites  = 50
-	expiredAt  = 5 * time.Second
-)
+const headerSize = 12
 
 type connection struct {
-	done      chan struct{}
-	conn      net.PacketConn
-	createdAt time.Time
-	count     int
-	lookup    func(addr string) types.Nameserver
+	done   chan struct{}
+	conn   net.PacketConn
+	lookup func(addr string) types.Nameserver
 }
 
 func newConnection(lookup func(addr string) types.Nameserver) *connection {
@@ -35,14 +27,11 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 		return nil
 	}
 
-	jitter := rand.Intn(maxJitter) + 1
 	_ = conn.SetDeadline(time.Time{})
 	c := &connection{
-		done:      make(chan struct{}),
-		conn:      conn,
-		count:     jitter,
-		createdAt: time.Now(),
-		lookup:    lookup,
+		done:   make(chan struct{}),
+		conn:   conn,
+		lookup: lookup,
 	}
 
 	go c.responses()
@@ -56,15 +45,6 @@ func (c *connection) close() {
 		close(c.done)
 		_ = c.conn.Close()
 	}
-}
-
-func (c *connection) delayedClose() {
-	time.Sleep(2 * time.Second)
-	c.close()
-}
-
-func (c *connection) expired() bool {
-	return c.count >= maxWrites && time.Since(c.createdAt) > expiredAt
 }
 
 func (c *connection) responses() {
@@ -116,7 +96,7 @@ func (c *connection) processResponse(response *resp) {
 			req.Server().RateMonitor().ReportRTT(rtt)
 
 			select {
-			case req.ResultChan() <- msg:
+			case req.RespChan() <- msg:
 				req.Release()
 			default:
 			}

@@ -7,6 +7,7 @@ package conn
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"time"
 
@@ -16,72 +17,39 @@ import (
 
 type Conn struct {
 	done  chan struct{}
-	conns chan *connection
+	conns []*connection
 	sel   types.Selector
 	cpus  int
 }
 
 func New(cpus int, sel types.Selector) *Conn {
-	conns := &Conn{
-		done:  make(chan struct{}),
-		conns: make(chan *connection, cpus),
-		sel:   sel,
-		cpus:  cpus,
+	conn := &Conn{
+		done: make(chan struct{}),
+		sel:  sel,
+		cpus: cpus,
 	}
 
 	for i := 0; i < cpus; {
 		if c := newConnection(sel.Lookup); c != nil {
 			i++
-			conns.putConnection(c)
+			conn.conns = append(conn.conns, c)
 		}
 	}
-	return conns
+	return conn
 }
 
 func (r *Conn) Close() {
 	close(r.done)
-	defer close(r.conns)
-loop:
-	for i := 0; i < r.cpus; i++ {
-		select {
-		case c := <-r.conns:
-			c.close()
-		default:
-			break loop
-		}
+
+	for _, c := range r.conns {
+		c.close()
 	}
 }
 
 func (r *Conn) getConnection() *connection {
-	var c *connection
-	t := time.NewTimer(time.Second)
-	defer t.Stop()
+	idx := rand.Intn(r.cpus)
 
-	select {
-	case <-r.done:
-		return nil
-	case <-t.C:
-		c = newConnection(r.sel.Lookup)
-	case c = <-r.conns:
-		c.count++
-		if c.expired() {
-			go c.delayedClose()
-			c = newConnection(r.sel.Lookup)
-		}
-	}
-
-	if c != nil {
-		r.putConnection(c)
-	}
-	return c
-}
-
-func (r *Conn) putConnection(c *connection) {
-	select {
-	case r.conns <- c:
-	default:
-		go c.delayedClose()
-	}
+	return r.conns[idx]
 }
 
 func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {

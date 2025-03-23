@@ -163,8 +163,10 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 	}
 
 	var sel types.Selector
-	if len(list) == 0 {
+	if llen := len(list); llen == 0 {
 		sel = selectors.NewAuthoritative(delay, servers.NewNameserver)
+	} else if llen == 1 {
+		sel = selectors.NewSingle(delay, servers.NewNameserver(list[0]))
 	} else {
 		sel = selectors.NewRandom(delay)
 		for _, addrstr := range list {
@@ -201,7 +203,9 @@ func EventLoop(p *params) {
 		case <-t.C:
 			if e, ok := finished.Next(); ok && e != nil {
 				processing--
-				fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
+					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+				}
 			}
 		case name := <-p.Requests:
 			count += len(p.Qtypes)
@@ -229,7 +233,9 @@ func EventLoop(p *params) {
 		case <-finished.Signal():
 			if e, ok := finished.Next(); ok && e != nil {
 				processing--
-				fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
+					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+				}
 			}
 		}
 		// Have all the queries been handled?
@@ -264,7 +270,7 @@ func processResponse(ctx context.Context, name string, resp *dns.Msg, out queue.
 		domain, err := publicsuffix.EffectiveTLDPlusOne(name)
 
 		if err != nil || p.Detector.WildcardDetected(ctx, resp, domain) {
-			resp = nil
+			resp.Rcode = types.RcodeNoResponse
 		}
 	}
 	out.Append(resp)

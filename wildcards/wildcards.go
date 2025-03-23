@@ -183,8 +183,13 @@ loop:
 		req := types.RequestPool.Get().(types.Request)
 		req.SetMessage(msg)
 		req.SetServer(r.server)
-		req.SetResultChan(ch)
-		go func() { _ = r.server.SendRequest(req, r.conns) }()
+		req.SetRespChan(ch)
+
+		if err := r.server.SendRequest(req, r.conns); err != nil {
+			req.NoResponse()
+			req.Release()
+			continue
+		}
 
 		select {
 		case <-ctx.Done():
