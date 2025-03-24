@@ -18,7 +18,7 @@ import (
 const (
 	headerSize = 12
 	maxWrites  = 100
-	maxJitter  = 5
+	maxJitter  = 10
 	expiredAt  = 3 * time.Second
 )
 
@@ -65,15 +65,22 @@ func (c *connection) get() net.PacketConn {
 
 	c.count++
 	if c.expired() {
-		n := c.newPacketConn()
-
-		if n != c.conn {
-			c.conn = n
-			c.createdAt = time.Now()
-			c.count = rand.Intn(maxJitter) + 1
-		}
+		c.rotatePacketConn()
 	}
 	return c.conn
+}
+
+func (c *connection) rotatePacketConn() {
+	pc := c.newPacketConn()
+	if pc == nil {
+		return
+	}
+
+	o := c.conn
+	c.conn = pc
+	_ = o.Close()
+	c.createdAt = time.Now()
+	c.count = rand.Intn(maxJitter) + 1
 }
 
 func (c *connection) newPacketConn() net.PacketConn {
@@ -92,10 +99,9 @@ func (c *connection) newPacketConn() net.PacketConn {
 		time.Sleep(backoff)
 	}
 	if !success {
-		return c.conn
+		return nil
 	}
 
-	_ = c.conn.Close()
 	_ = pc.SetDeadline(time.Time{})
 	return pc
 }

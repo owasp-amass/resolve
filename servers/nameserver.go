@@ -62,12 +62,13 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	}
 
 	ns.rate.Take()
+	req.SetSentAt(time.Now())
 	msg := req.Message().Copy()
+
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
 
-	req.SetSentAt(time.Now())
 	if err := conns.WriteMsg(msg, ns.addr); err != nil {
 		_ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
 		return err
