@@ -59,20 +59,18 @@ func (c *connection) close() {
 	}
 }
 
-func delayedClose(pc net.PacketConn) {
-	time.Sleep(time.Second)
-	_ = pc.Close()
-}
-
 func (c *connection) get() net.PacketConn {
 	c.Lock()
 	defer c.Unlock()
 
 	c.count++
 	if c.expired() {
-		c.conn = c.newPacketConn()
-		c.count = rand.Intn(maxJitter) + 1
-		c.createdAt = time.Now()
+		n := c.newPacketConn()
+
+		if n != c.conn {
+			c.createdAt = time.Now()
+			c.count = rand.Intn(maxJitter) + 1
+		}
 	}
 	return c.conn
 }
@@ -96,13 +94,13 @@ func (c *connection) newPacketConn() net.PacketConn {
 		return c.conn
 	}
 
+	_ = c.conn.Close()
 	_ = pc.SetDeadline(time.Time{})
-	go delayedClose(c.conn)
 	return pc
 }
 
 func (c *connection) expired() bool {
-	return c.count >= maxWrites && time.Since(c.createdAt) > expiredAt
+	return c.count >= maxWrites || time.Since(c.createdAt) > expiredAt
 }
 
 func (c *connection) responses() {
@@ -150,18 +148,20 @@ func (c *connection) processResponse(response *resp) {
 
 	msg := response.Msg
 	name := msg.Question[0].Name
+
 	if req := serv.XchgManager().Remove(msg.Id, name); req != nil {
 		if msg.Truncated {
 			utils.TCPExchange(req, 3*time.Second)
-		} else {
-			rtt := response.At.Sub(req.SentAt())
-			req.Server().RateMonitor().ReportRTT(rtt)
+			return
+		}
 
-			select {
-			case req.RespChan() <- msg:
-				req.Release()
-			default:
-			}
+		rtt := response.At.Sub(req.SentAt())
+		req.Server().RateMonitor().ReportRTT(rtt)
+
+		select {
+		case req.RespChan() <- msg:
+			req.Release()
+		default:
 		}
 	}
 }
