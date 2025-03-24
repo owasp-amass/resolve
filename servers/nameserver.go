@@ -78,7 +78,7 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	return nil
 }
 
-func (ns *nameserver) RequestResponse(resp *dns.Msg, recvAt time.Time) {
+func (ns *nameserver) RequestResponse(resp *dns.Msg, at time.Time) {
 	name := resp.Question[0].Name
 
 	req, found := ns.xchgs.Remove(resp.Id, name)
@@ -86,7 +86,7 @@ func (ns *nameserver) RequestResponse(resp *dns.Msg, recvAt time.Time) {
 		return
 	}
 
-	rtt := recvAt.Sub(req.SentAt())
+	rtt := at.Sub(req.SentAt())
 	ns.rate.ReportRTT(rtt)
 
 	if resp.Truncated {

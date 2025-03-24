@@ -16,7 +16,7 @@ type Nameserver interface {
 	XchgManager() XchgManager
 	RateMonitor() RateTrack
 	SendRequest(req Request, conns Conn) error
-	RequestResponse(resp *dns.Msg, recvAt time.Time)
+	RequestResponse(resp *dns.Msg, at time.Time)
 	NsecTraversal(domain string, conns Conn) ([]*dns.NSEC, error)
 	Close()
 }

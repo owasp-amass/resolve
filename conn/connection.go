@@ -70,13 +70,13 @@ func (c *connection) get() net.PacketConn {
 }
 
 func (c *connection) rotatePacketConn() {
-	c.Lock()
-	defer c.Unlock()
-
 	pc := newPacketConn()
 	if pc == nil {
 		return
 	}
+
+	c.Lock()
+	defer c.Unlock()
 
 	o := c.conn
 	c.conn = pc
@@ -131,26 +131,16 @@ func (c *connection) responses() {
 
 			m := new(dns.Msg)
 			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
-				go c.processResponse(&resp{
-					Msg:  m,
-					Addr: addr,
-					At:   at,
-				})
+				go c.processResponse(m, addr, at)
 			}
 		}
 	}
 }
 
-type resp struct {
-	Msg  *dns.Msg
-	Addr net.Addr
-	At   time.Time
-}
+func (c *connection) processResponse(msg *dns.Msg, addr net.Addr, at time.Time) {
+	a, _, _ := net.SplitHostPort(addr.String())
 
-func (c *connection) processResponse(r *resp) {
-	addr, _, _ := net.SplitHostPort(r.Addr.String())
-
-	if serv := c.lookup(addr); serv != nil {
-		serv.RequestResponse(r.Msg, r.At)
+	if serv := c.lookup(a); serv != nil {
+		serv.RequestResponse(msg, at)
 	}
 }
