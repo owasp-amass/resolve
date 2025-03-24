@@ -186,8 +186,8 @@ loop:
 		req.SetRespChan(ch)
 
 		if err := r.server.SendRequest(req, r.conns); err != nil {
-			req.NoResponse()
 			req.Release()
+			continue
 		}
 
 		select {

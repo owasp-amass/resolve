@@ -51,7 +51,6 @@ func (ns *nameserver) searchGap(name string, conns types.Conn) (*dns.NSEC, error
 		req.SetRespChan(ch)
 
 		if err := ns.SendRequest(req, conns); err != nil {
-			req.NoResponse()
 			req.Release()
 			continue
 		}

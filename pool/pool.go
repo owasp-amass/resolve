@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"sync"
 
 	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
@@ -18,7 +17,6 @@ import (
 
 // Pool is a managed pool of DNS nameservers.
 type Pool struct {
-	sync.Mutex
 	done     chan struct{}
 	log      *log.Logger
 	Conns    types.Conn
