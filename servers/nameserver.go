@@ -58,22 +58,20 @@ func (ns *nameserver) Close() {
 }
 
 func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
-	if req == nil {
-		return errors.New("the request is nil")
+	if req.Message() == nil {
+		return errors.New("the request message is nil")
 	}
-	if conns == nil {
-		return errors.New("the connection is nil")
-	}
+	msg := req.Message().Copy()
 
 	req.SetServer(ns)
-	msg := req.Message().Copy()
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
 
 	ns.rate.Take()
-	req.SetSentAt(time.Now())
-	if err := conns.WriteMsg(msg, ns.addr); err != nil {
+	if err := conns.WriteMsg(msg, ns); err != nil {
+		msg := req.Message()
+
 		if _, found := ns.xchgs.Remove(msg.Id, msg.Question[0].Name); found {
 			return err
 		}

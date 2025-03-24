@@ -110,8 +110,8 @@ func (r *Pool) processSingleReq(req types.Request) {
 	name := req.Message().Question[0].Name
 
 	if serv := r.Selector.Get(name); serv != nil {
-		req.SetServer(serv)
 		_ = r.rate.Wait(context.TODO())
+
 		if err := serv.SendRequest(req, r.Conns); err == nil {
 			return
 		}

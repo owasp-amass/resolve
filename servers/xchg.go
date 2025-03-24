@@ -5,6 +5,7 @@
 package servers
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -34,6 +35,18 @@ func (r *xchgMgr) Add(req types.Request) error {
 	return nil
 }
 
+func (r *xchgMgr) Modify(id uint16, name string, callback func(req types.Request)) error {
+	r.Lock()
+	defer r.Unlock()
+
+	key := xchgKey(id, name)
+	if req, found := r.xchgs[key]; found {
+		callback(req)
+		return nil
+	}
+	return errors.New("failed to modify the request")
+}
+
 func (r *xchgMgr) Remove(id uint16, name string) (types.Request, bool) {
 	r.Lock()
 	defer r.Unlock()
@@ -58,7 +71,6 @@ func (r *xchgMgr) RemoveExpired(timeout time.Duration) []types.Request {
 			keys = append(keys, key)
 		}
 	}
-
 	return r.Delete(keys)
 }
 
@@ -70,7 +82,6 @@ func (r *xchgMgr) RemoveAll() []types.Request {
 	for key := range r.xchgs {
 		keys = append(keys, key)
 	}
-
 	return r.Delete(keys)
 }
 

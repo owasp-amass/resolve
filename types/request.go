@@ -99,14 +99,8 @@ func (r *request) NoResponse() {
 	r.Lock()
 	defer r.Unlock()
 
-	if r.msg != nil {
-		r.msg.Rcode = RcodeNoResponse
-	}
-
-	select {
-	case r.resp <- r.msg:
-	default:
-	}
+	r.msg.Rcode = RcodeNoResponse
+	r.resp <- r.msg
 }
 
 func (r *request) Release() {

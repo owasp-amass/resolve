@@ -29,6 +29,7 @@ type RateTrack interface {
 // XchgManager handles DNS message IDs and identifying messages that have timed out.
 type XchgManager interface {
 	Add(req Request) error
+	Modify(id uint16, name string, callback func(req Request)) error
 	Remove(id uint16, name string) (Request, bool)
 	RemoveExpired(timeout time.Duration) []Request
 	RemoveAll() []Request

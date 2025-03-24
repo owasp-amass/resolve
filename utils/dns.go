@@ -17,9 +17,10 @@ func TCPExchange(req types.Request, timeout time.Duration) {
 		Timeout: timeout,
 	}
 
-	if m, _, err := client.Exchange(req.Message(), req.Server().Address().String()); err == nil {
+	msg := req.Message().Copy()
+	if resp, _, err := client.Exchange(msg, req.Server().Address().String()); err == nil && resp != nil {
 		go func() {
-			req.SendResponse(m)
+			req.SendResponse(resp)
 			req.Release()
 		}()
 		return

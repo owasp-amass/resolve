@@ -200,18 +200,11 @@ func EventLoop(p *params) {
 
 	for {
 		select {
-		case <-t.C:
-			if e, ok := finished.Next(); ok && e != nil {
-				processing--
-				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
-					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
-				}
-			}
 		case name := <-p.Requests:
 			count += len(p.Qtypes)
 			sendInitialRequests(context.Background(), name, queries, responses, p)
 		case resp := <-responses:
-			name := utils.RemoveLastDot(strings.ToLower(resp.Question[0].Name))
+			name := strings.ToLower(utils.RemoveLastDot(resp.Question[0].Name))
 			k := key(name, resp.Question[0].Qtype)
 			// Check if there was an error or timeout requiring another attempt
 			if resp.Rcode == types.RcodeNoResponse {
@@ -231,6 +224,13 @@ func EventLoop(p *params) {
 			count--
 			delete(queries, k)
 		case <-finished.Signal():
+			if e, ok := finished.Next(); ok && e != nil {
+				processing--
+				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
+					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+				}
+			}
+		case <-t.C:
 			if e, ok := finished.Next(); ok && e != nil {
 				processing--
 				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {

@@ -74,7 +74,9 @@ func (c *connection) get() (net.PacketConn, error) {
 
 	c.count++
 	if c.expired() {
-		go c.rotatePacketConn()
+		//go c.rotatePacketConn()
+		c.createdAt = time.Now()
+		c.count = rand.Intn(maxJitter) + 1
 	}
 	return c.conn, nil
 }
@@ -97,8 +99,6 @@ func (c *connection) rotatePacketConn() {
 	o := c.conn
 	c.conn = pc
 	_ = o.Close()
-	c.createdAt = time.Now()
-	c.count = rand.Intn(maxJitter) + 1
 }
 
 func newPacketConn() (net.PacketConn, error) {
@@ -113,7 +113,7 @@ func newPacketConn() (net.PacketConn, error) {
 			break
 		}
 
-		backoff := utils.ExponentialBackoff(i+1, 100*time.Millisecond)
+		backoff := utils.ExponentialBackoff(i, 250*time.Millisecond)
 		time.Sleep(backoff)
 	}
 	if !success {

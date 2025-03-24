@@ -52,7 +52,7 @@ func (r *Conn) getPacketConn() (net.PacketConn, error) {
 	return r.conns[idx].get()
 }
 
-func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
+func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 	select {
 	case <-r.done:
 		return errors.New("the connection pool has been closed")
@@ -68,9 +68,16 @@ func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	if err != nil {
 		return err
 	}
-	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
-	n, err := c.WriteTo(out, addr)
+	err = ns.XchgManager().Modify(msg.Id, msg.Question[0].Name, func(req types.Request) {
+		req.SetSentAt(time.Now())
+	})
+	if err != nil {
+		return err
+	}
+
+	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	n, err := c.WriteTo(out, ns.Address())
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 	}
