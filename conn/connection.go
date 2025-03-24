@@ -17,7 +17,7 @@ import (
 
 const (
 	headerSize = 12
-	maxWrites  = 25
+	maxWrites  = 100
 	maxJitter  = 5
 	expiredAt  = 3 * time.Second
 )
@@ -68,6 +68,7 @@ func (c *connection) get() net.PacketConn {
 		n := c.newPacketConn()
 
 		if n != c.conn {
+			c.conn = n
 			c.createdAt = time.Now()
 			c.count = rand.Intn(maxJitter) + 1
 		}
