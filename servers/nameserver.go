@@ -50,8 +50,10 @@ func (ns *nameserver) RateMonitor() types.RateTrack {
 func (ns *nameserver) Close() {
 	// Drain the xchgs of all messages and allow callers to return
 	for _, req := range ns.xchgs.RemoveAll() {
-		req.NoResponse()
-		req.Release()
+		go func(req types.Request) {
+			req.NoResponse()
+			req.Release()
+		}(req)
 	}
 }
 
@@ -63,16 +65,18 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 		return errors.New("the connection is nil")
 	}
 
-	ns.rate.Take()
-	req.SetSentAt(time.Now())
+	req.SetServer(ns)
 	msg := req.Message().Copy()
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
 
+	ns.rate.Take()
+	req.SetSentAt(time.Now())
 	if err := conns.WriteMsg(msg, ns.addr); err != nil {
-		_, _ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
-		return err
+		if _, found := ns.xchgs.Remove(msg.Id, msg.Question[0].Name); found {
+			return err
+		}
 	}
 	return nil
 }
@@ -93,9 +97,6 @@ func (ns *nameserver) RequestResponse(resp *dns.Msg, at time.Time) {
 		return
 	}
 
-	select {
-	case req.RespChan() <- resp:
-		req.Release()
-	default:
-	}
+	req.SendResponse(resp)
+	req.Release()
 }

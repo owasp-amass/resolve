@@ -46,7 +46,7 @@ func (r *Conn) Close() {
 	}
 }
 
-func (r *Conn) getPacketConn() net.PacketConn {
+func (r *Conn) getPacketConn() (net.PacketConn, error) {
 	idx := rand.Intn(r.cpus)
 
 	return r.conns[idx].get()
@@ -64,7 +64,10 @@ func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 		return err
 	}
 
-	c := r.getPacketConn()
+	c, err := r.getPacketConn()
+	if err != nil {
+		return err
+	}
 	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
 	n, err := c.WriteTo(out, addr)

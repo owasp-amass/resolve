@@ -17,18 +17,16 @@ func TCPExchange(req types.Request, timeout time.Duration) {
 		Timeout: timeout,
 	}
 
-	release := true
 	if m, _, err := client.Exchange(req.Message(), req.Server().Address().String()); err == nil {
-		select {
-		case req.RespChan() <- m:
-		default:
-			release = false
-		}
-	} else {
-		req.NoResponse()
+		go func() {
+			req.SendResponse(m)
+			req.Release()
+		}()
+		return
 	}
 
-	if release {
+	go func() {
+		req.NoResponse()
 		req.Release()
-	}
+	}()
 }

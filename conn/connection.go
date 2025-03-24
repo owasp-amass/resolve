@@ -5,6 +5,7 @@
 package conn
 
 import (
+	"errors"
 	"math/rand"
 	"net"
 	"sync"
@@ -50,6 +51,9 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 }
 
 func (c *connection) close() {
+	c.Lock()
+	defer c.Unlock()
+
 	select {
 	case <-c.done:
 	default:
@@ -58,7 +62,13 @@ func (c *connection) close() {
 	}
 }
 
-func (c *connection) get() net.PacketConn {
+func (c *connection) get() (net.PacketConn, error) {
+	select {
+	case <-c.done:
+		return nil, errors.New("the connection has been closed")
+	default:
+	}
+
 	c.Lock()
 	defer c.Unlock()
 
@@ -66,10 +76,16 @@ func (c *connection) get() net.PacketConn {
 	if c.expired() {
 		go c.rotatePacketConn()
 	}
-	return c.conn
+	return c.conn, nil
 }
 
 func (c *connection) rotatePacketConn() {
+	select {
+	case <-c.done:
+		return
+	default:
+	}
+
 	pc, err := newPacketConn()
 	if err != nil {
 		return

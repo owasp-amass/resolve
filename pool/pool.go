@@ -102,6 +102,8 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 	resp := <-ch
 	if resp == nil {
 		err = errors.New("query failed")
+	} else if resp.Rcode == types.RcodeNoResponse {
+		err = errors.New("no response received")
 	}
 	return resp, err
 }

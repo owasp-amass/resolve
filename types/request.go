@@ -24,8 +24,8 @@ type Request interface {
 	SetSentAt(t time.Time)
 	Message() *dns.Msg
 	SetMessage(m *dns.Msg)
-	RespChan() chan *dns.Msg
 	SetRespChan(c chan *dns.Msg)
+	SendResponse(resp *dns.Msg)
 	NoResponse()
 	Release()
 }
@@ -86,19 +86,14 @@ func (r *request) SetMessage(m *dns.Msg) {
 	r.msg = m
 }
 
-func (r *request) RespChan() chan *dns.Msg {
-	r.Lock()
-	defer r.Unlock()
-
-	return r.resp
-}
-
 func (r *request) SetRespChan(c chan *dns.Msg) {
 	r.Lock()
 	defer r.Unlock()
 
 	r.resp = c
 }
+
+func (r *request) SendResponse(resp *dns.Msg) { r.resp <- resp }
 
 func (r *request) NoResponse() {
 	r.Lock()

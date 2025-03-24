@@ -116,8 +116,10 @@ func (r *random) timeouts() {
 
 		for _, ns := range cp {
 			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
-				req.NoResponse()
-				req.Release()
+				go func(req types.Request) {
+					req.NoResponse()
+					req.Release()
+				}(req)
 			}
 		}
 

@@ -45,8 +45,10 @@ func (r *single) timeouts() {
 		}
 
 		for _, req := range r.server.XchgManager().RemoveExpired(r.timeout) {
-			req.NoResponse()
-			req.Release()
+			go func(req types.Request) {
+				req.NoResponse()
+				req.Release()
+			}(req)
 		}
 
 		t.Reset(r.timeout)
