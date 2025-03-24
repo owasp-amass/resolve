@@ -305,11 +305,11 @@ func (r *authoritative) timeouts() {
 	t := time.NewTimer(r.timeout)
 	defer t.Stop()
 
-	for range t.C {
+	for {
 		select {
 		case <-r.done:
 			return
-		default:
+		case <-t.C:
 		}
 
 		r.Lock()

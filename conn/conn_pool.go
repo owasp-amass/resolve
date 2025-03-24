@@ -65,9 +65,6 @@ func (r *Conn) WriteMsg(msg *dns.Msg, addr net.Addr) error {
 	}
 
 	c := r.getPacketConn()
-	if c == nil {
-		return errors.New("failed to obtain a connection")
-	}
 	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
 	n, err := c.WriteTo(out, addr)

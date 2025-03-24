@@ -34,17 +34,20 @@ func TestXchgAddRemove(t *testing.T) {
 	if !found {
 		t.Error("Failed to fetch the request")
 	}
-	resp := ret.Message()
 
-	if ret == nil || resp == nil || name != strings.ToLower(utils.RemoveLastDot(resp.Question[0].Name)) {
+	resp := ret.Message()
+	if resp == nil || len(resp.Question) == 0 {
+		t.Error("Failed to extract the message from the request")
+	}
+
+	name2 := utils.RemoveLastDot(resp.Question[0].Name)
+	if !strings.EqualFold(name, name2) {
 		t.Errorf("Did not find and remove the message from the data structure")
 	}
-	ret, found = xchg.Remove(msg.Id, msg.Question[0].Name)
-	if !found {
-		t.Error("Failed to fetch the request")
-	}
-	if ret != nil {
-		t.Errorf("Did not return nil when attempting to remove an element for the second time")
+
+	_, found = xchg.Remove(msg.Id, msg.Question[0].Name)
+	if found {
+		t.Error("Found the request when attempting to remove for the second time")
 	}
 	if err := xchg.Add(req); err != nil {
 		t.Errorf("Failed to add the request after being removed")

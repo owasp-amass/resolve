@@ -66,7 +66,6 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	ns.rate.Take()
 	req.SetSentAt(time.Now())
 	msg := req.Message().Copy()
-
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}

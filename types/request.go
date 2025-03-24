@@ -104,10 +104,9 @@ func (r *request) NoResponse() {
 	r.Lock()
 	defer r.Unlock()
 
-	if r.msg == nil || r.resp != nil {
-		return
+	if r.msg != nil {
+		r.msg.Rcode = RcodeNoResponse
 	}
-	r.msg.Rcode = RcodeNoResponse
 
 	select {
 	case r.resp <- r.msg:

@@ -37,11 +37,11 @@ func (r *single) timeouts() {
 	t := time.NewTimer(r.timeout)
 	defer t.Stop()
 
-	for range t.C {
+	for {
 		select {
 		case <-r.done:
 			return
-		default:
+		case <-t.C:
 		}
 
 		for _, req := range r.server.XchgManager().RemoveExpired(r.timeout) {

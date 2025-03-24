@@ -51,15 +51,21 @@ func TestPoolQuery(t *testing.T) {
 	defer conns.Close()
 
 	num := 100
-	var failures int
-	ch := make(chan *dns.Msg, 50)
-	defer close(ch)
+	var channels []chan *dns.Msg
+	for i := 0; i < num; i++ {
+		ch := make(chan *dns.Msg, 1)
+		defer close(ch)
+
+		channels = append(channels, ch)
+	}
 
 	for i := 0; i < num; i++ {
-		p.Query(context.Background(), utils.QueryMsg("pool.net", dns.TypeA), ch)
+		p.Query(context.Background(), utils.QueryMsg("pool.net", dns.TypeA), channels[i])
 	}
+
+	var failures int
 	for i := 0; i < num; i++ {
-		if m := <-ch; m == nil || len(m.Answer) == 0 {
+		if m := <-channels[i]; m == nil || len(m.Answer) == 0 {
 			failures++
 		} else if rrs := utils.AnswersByType(m, dns.TypeA); len(rrs) == 0 || (rrs[0].(*dns.A)).A.String() != "192.168.1.1" {
 			failures++

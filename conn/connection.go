@@ -32,14 +32,14 @@ type connection struct {
 }
 
 func newConnection(lookup func(addr string) types.Nameserver) *connection {
-	conn := newPacketConn()
-	if conn == nil {
+	pc, err := newPacketConn()
+	if err != nil {
 		return nil
 	}
 
 	c := &connection{
 		done:      make(chan struct{}),
-		conn:      conn,
+		conn:      pc,
 		count:     rand.Intn(maxJitter) + 1,
 		createdAt: time.Now(),
 		lookup:    lookup,
@@ -70,8 +70,8 @@ func (c *connection) get() net.PacketConn {
 }
 
 func (c *connection) rotatePacketConn() {
-	pc := newPacketConn()
-	if pc == nil {
+	pc, err := newPacketConn()
+	if err != nil {
 		return
 	}
 
@@ -85,7 +85,7 @@ func (c *connection) rotatePacketConn() {
 	c.count = rand.Intn(maxJitter) + 1
 }
 
-func newPacketConn() net.PacketConn {
+func newPacketConn() (net.PacketConn, error) {
 	var err error
 	var success bool
 	var pc net.PacketConn
@@ -101,11 +101,11 @@ func newPacketConn() net.PacketConn {
 		time.Sleep(backoff)
 	}
 	if !success {
-		return nil
+		return nil, err
 	}
 
 	_ = pc.SetDeadline(time.Time{})
-	return pc
+	return pc, nil
 }
 
 func (c *connection) expired() bool {
