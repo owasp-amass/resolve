@@ -32,12 +32,11 @@ type connection struct {
 }
 
 func newConnection(lookup func(addr string) types.Nameserver) *connection {
-	conn, err := net.ListenPacket("udp", ":0")
-	if err != nil || conn == nil {
+	conn := newPacketConn()
+	if conn == nil {
 		return nil
 	}
 
-	_ = conn.SetDeadline(time.Time{})
 	c := &connection{
 		done:      make(chan struct{}),
 		conn:      conn,
@@ -65,13 +64,16 @@ func (c *connection) get() net.PacketConn {
 
 	c.count++
 	if c.expired() {
-		c.rotatePacketConn()
+		go c.rotatePacketConn()
 	}
 	return c.conn
 }
 
 func (c *connection) rotatePacketConn() {
-	pc := c.newPacketConn()
+	c.Lock()
+	defer c.Unlock()
+
+	pc := newPacketConn()
 	if pc == nil {
 		return
 	}
@@ -83,7 +85,7 @@ func (c *connection) rotatePacketConn() {
 	c.count = rand.Intn(maxJitter) + 1
 }
 
-func (c *connection) newPacketConn() net.PacketConn {
+func newPacketConn() net.PacketConn {
 	var err error
 	var success bool
 	var pc net.PacketConn
@@ -145,30 +147,10 @@ type resp struct {
 	At   time.Time
 }
 
-func (c *connection) processResponse(response *resp) {
-	addr, _, _ := net.SplitHostPort(response.Addr.String())
+func (c *connection) processResponse(r *resp) {
+	addr, _, _ := net.SplitHostPort(r.Addr.String())
 
-	serv := c.lookup(addr)
-	if serv == nil {
-		return
-	}
-
-	msg := response.Msg
-	name := msg.Question[0].Name
-
-	if req := serv.XchgManager().Remove(msg.Id, name); req != nil {
-		if msg.Truncated {
-			utils.TCPExchange(req, 3*time.Second)
-			return
-		}
-
-		rtt := response.At.Sub(req.SentAt())
-		req.Server().RateMonitor().ReportRTT(rtt)
-
-		select {
-		case req.RespChan() <- msg:
-			req.Release()
-		default:
-		}
+	if serv := c.lookup(addr); serv != nil {
+		serv.RequestResponse(r.Msg, r.At)
 	}
 }

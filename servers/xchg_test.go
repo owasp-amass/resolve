@@ -30,13 +30,19 @@ func TestXchgAddRemove(t *testing.T) {
 		t.Errorf("Failed to detect the same request added twice")
 	}
 
-	ret := xchg.Remove(msg.Id, msg.Question[0].Name)
+	ret, found := xchg.Remove(msg.Id, msg.Question[0].Name)
+	if !found {
+		t.Error("Failed to fetch the request")
+	}
 	resp := ret.Message()
 
 	if ret == nil || resp == nil || name != strings.ToLower(utils.RemoveLastDot(resp.Question[0].Name)) {
 		t.Errorf("Did not find and remove the message from the data structure")
 	}
-	ret = xchg.Remove(msg.Id, msg.Question[0].Name)
+	ret, found = xchg.Remove(msg.Id, msg.Question[0].Name)
+	if !found {
+		t.Error("Failed to fetch the request")
+	}
 	if ret != nil {
 		t.Errorf("Did not return nil when attempting to remove an element for the second time")
 	}

@@ -9,7 +9,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
 func NewNameserver(addr string) types.Nameserver {
@@ -70,8 +72,31 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	}
 
 	if err := conns.WriteMsg(msg, ns.addr); err != nil {
-		_ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
+		_, _ = ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
 		return err
 	}
 	return nil
+}
+
+func (ns *nameserver) RequestResponse(resp *dns.Msg, recvAt time.Time) {
+	name := resp.Question[0].Name
+
+	req, found := ns.xchgs.Remove(resp.Id, name)
+	if !found {
+		return
+	}
+
+	rtt := recvAt.Sub(req.SentAt())
+	ns.rate.ReportRTT(rtt)
+
+	if resp.Truncated {
+		utils.TCPExchange(req, 3*time.Second)
+		return
+	}
+
+	select {
+	case req.RespChan() <- resp:
+		req.Release()
+	default:
+	}
 }

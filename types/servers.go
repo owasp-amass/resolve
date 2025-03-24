@@ -16,6 +16,7 @@ type Nameserver interface {
 	XchgManager() XchgManager
 	RateMonitor() RateTrack
 	SendRequest(req Request, conns Conn) error
+	RequestResponse(resp *dns.Msg, recvAt time.Time)
 	NsecTraversal(domain string, conns Conn) ([]*dns.NSEC, error)
 	Close()
 }
@@ -28,7 +29,7 @@ type RateTrack interface {
 // XchgManager handles DNS message IDs and identifying messages that have timed out.
 type XchgManager interface {
 	Add(req Request) error
-	Remove(id uint16, name string) Request
+	Remove(id uint16, name string) (Request, bool)
 	RemoveExpired(timeout time.Duration) []Request
 	RemoveAll() []Request
 	Delete(keys []string) []Request

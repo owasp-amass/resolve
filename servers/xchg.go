@@ -34,17 +34,17 @@ func (r *xchgMgr) Add(req types.Request) error {
 	return nil
 }
 
-func (r *xchgMgr) Remove(id uint16, name string) types.Request {
+func (r *xchgMgr) Remove(id uint16, name string) (types.Request, bool) {
 	r.Lock()
 	defer r.Unlock()
 
 	key := xchgKey(id, name)
 	if _, found := r.xchgs[key]; found {
 		if reqs := r.Delete([]string{key}); len(reqs) > 0 {
-			return reqs[0]
+			return reqs[0], true
 		}
 	}
-	return nil
+	return nil, false
 }
 
 func (r *xchgMgr) RemoveExpired(timeout time.Duration) []types.Request {
