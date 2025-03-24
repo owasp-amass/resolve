@@ -20,9 +20,7 @@ func TestXchgAddRemove(t *testing.T) {
 	xchg := NewXchgMgr()
 	msg := utils.QueryMsg(name, dns.TypeA)
 
-	req := types.RequestPool.Get().(types.Request)
-	req.SetMessage(msg)
-
+	req := types.NewRequest(msg, nil)
 	if err := xchg.Add(req); err != nil {
 		t.Errorf("Failed to add the request")
 	}
@@ -60,8 +58,7 @@ func TestXchgRemoveExpired(t *testing.T) {
 
 	for _, name := range names {
 		msg := utils.QueryMsg(name, dns.TypeA)
-		req := types.RequestPool.Get().(types.Request)
-		req.SetMessage(msg)
+		req := types.NewRequest(msg, nil)
 		req.SetSentAt(time.Now())
 
 		if err := xchg.Add(req); err != nil {
@@ -71,8 +68,7 @@ func TestXchgRemoveExpired(t *testing.T) {
 	// Add one request that should not be removed with the others
 	name := "vpn.caffix.net"
 	msg := utils.QueryMsg(name, dns.TypeA)
-	req := types.RequestPool.Get().(types.Request)
-	req.SetMessage(msg)
+	req := types.NewRequest(msg, nil)
 	req.SetSentAt(time.Now().Add(3 * time.Second))
 
 	if err := xchg.Add(req); err != nil {
@@ -102,8 +98,7 @@ func TestXchgRemoveAll(t *testing.T) {
 
 	for _, name := range names {
 		msg := utils.QueryMsg(name, dns.TypeA)
-		req := types.RequestPool.Get().(types.Request)
-		req.SetMessage(msg)
+		req := types.NewRequest(msg, nil)
 
 		if err := xchg.Add(req); err != nil {
 			t.Errorf("Failed to add the request")

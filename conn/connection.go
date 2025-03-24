@@ -81,25 +81,27 @@ func (c *connection) get() (net.PacketConn, error) {
 	return c.conn, nil
 }
 
-func (c *connection) rotatePacketConn() {
-	select {
-	case <-c.done:
-		return
-	default:
+/*
+	func (c *connection) rotatePacketConn() {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+
+		pc, err := newPacketConn()
+		if err != nil {
+			return
+		}
+
+		c.Lock()
+		defer c.Unlock()
+
+		o := c.conn
+		c.conn = pc
+		_ = o.Close()
 	}
-
-	pc, err := newPacketConn()
-	if err != nil {
-		return
-	}
-
-	c.Lock()
-	defer c.Unlock()
-
-	o := c.conn
-	c.conn = pc
-	_ = o.Close()
-}
+*/
 
 func newPacketConn() (net.PacketConn, error) {
 	var err error

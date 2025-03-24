@@ -65,12 +65,8 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		if req := types.RequestPool.Get().(types.Request); req != nil {
-			req.SetMessage(msg)
-			req.SetRespChan(ch)
-			go r.processSingleReq(req)
-			return
-		}
+		go r.processSingleReq(types.NewRequest(msg, ch))
+		return
 	}
 
 	msg.Rcode = types.RcodeNoResponse

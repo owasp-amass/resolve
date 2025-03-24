@@ -88,10 +88,8 @@ func TestTCPExchange(t *testing.T) {
 	defer close(ch)
 	msg := utils.QueryMsg(name, dns.TypeA)
 
-	req := types.RequestPool.Get().(types.Request)
+	req := types.NewRequest(msg, ch)
 	req.SetServer(serv)
-	req.SetMessage(msg)
-	req.SetRespChan(ch)
 	utils.TCPExchange(req, 50*time.Millisecond)
 
 	if resp := <-ch; resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
@@ -126,10 +124,8 @@ func TestBadTCPExchange(t *testing.T) {
 	defer close(ch)
 	msg := utils.QueryMsg(name, dns.TypeA)
 
-	req := types.RequestPool.Get().(types.Request)
+	req := types.NewRequest(msg, ch)
 	req.SetServer(serv)
-	req.SetMessage(msg)
-	req.SetRespChan(ch)
 	utils.TCPExchange(req, 50*time.Millisecond)
 
 	if resp := <-ch; resp.Rcode != types.RcodeNoResponse {

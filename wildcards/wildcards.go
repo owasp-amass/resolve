@@ -179,12 +179,7 @@ loop:
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
-		msg := utils.QueryMsg(name, qtype)
-		req := types.RequestPool.Get().(types.Request)
-		req.SetMessage(msg)
-		req.SetServer(r.server)
-		req.SetRespChan(ch)
-
+		req := types.NewRequest(utils.QueryMsg(name, qtype), ch)
 		if err := r.server.SendRequest(req, r.conns); err != nil {
 			req.Release()
 			continue

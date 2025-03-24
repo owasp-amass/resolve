@@ -23,17 +23,9 @@ type Request interface {
 	SentAt() time.Time
 	SetSentAt(t time.Time)
 	Message() *dns.Msg
-	SetMessage(m *dns.Msg)
-	SetRespChan(c chan *dns.Msg)
 	SendResponse(resp *dns.Msg)
 	NoResponse()
 	Release()
-}
-
-var RequestPool = sync.Pool{
-	New: func() any {
-		return new(request)
-	},
 }
 
 type request struct {
@@ -42,6 +34,21 @@ type request struct {
 	sentAt time.Time
 	msg    *dns.Msg
 	resp   chan *dns.Msg
+}
+
+var requestPool = sync.Pool{
+	New: func() any {
+		return new(request)
+	},
+}
+
+func NewRequest(msg *dns.Msg, ch chan *dns.Msg) Request {
+	r := requestPool.Get().(*request)
+
+	r.msg = msg
+	r.resp = ch
+	r.sentAt = time.Time{}
+	return r
 }
 
 func (r *request) Server() Nameserver {
@@ -79,20 +86,6 @@ func (r *request) Message() *dns.Msg {
 	return r.msg
 }
 
-func (r *request) SetMessage(m *dns.Msg) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.msg = m
-}
-
-func (r *request) SetRespChan(c chan *dns.Msg) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.resp = c
-}
-
 func (r *request) SendResponse(resp *dns.Msg) { r.resp <- resp }
 
 func (r *request) NoResponse() {
@@ -104,6 +97,5 @@ func (r *request) NoResponse() {
 }
 
 func (r *request) Release() {
-	*r = request{} // Zero it out
-	RequestPool.Put(r)
+	requestPool.Put(r)
 }

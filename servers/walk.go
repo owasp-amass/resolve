@@ -44,12 +44,7 @@ func (ns *nameserver) searchGap(name string, conns types.Conn) (*dns.NSEC, error
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
-		msg := utils.WalkMsg(name, dns.TypeNSEC)
-		req := types.RequestPool.Get().(types.Request)
-		req.SetServer(ns)
-		req.SetMessage(msg)
-		req.SetRespChan(ch)
-
+		req := types.NewRequest(utils.WalkMsg(name, dns.TypeNSEC), ch)
 		if err := ns.SendRequest(req, conns); err != nil {
 			req.Release()
 			continue
