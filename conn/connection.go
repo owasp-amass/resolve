@@ -14,7 +14,7 @@ import (
 
 const (
 	headerSize = 12
-	expiredAt  = 10 * time.Second
+	expiredAt  = 1 * time.Second
 )
 
 type connection struct {
@@ -48,7 +48,6 @@ func (c *connection) close() {
 	default:
 		close(c.done)
 		_ = c.conn.Close()
-		c.conn = nil
 	}
 }
 
