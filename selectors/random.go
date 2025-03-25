@@ -38,8 +38,8 @@ func (r *random) Get(fqdn string) types.Nameserver {
 }
 
 func (r *random) Lookup(addr string) types.Nameserver {
-	r.Lock()
-	defer r.Unlock()
+	r.lookupLock.Lock()
+	defer r.lookupLock.Unlock()
 
 	return r.lookup[addr]
 }
@@ -49,9 +49,9 @@ func (r *random) Add(ns types.Nameserver) {
 	defer r.Unlock()
 
 	addrstr := ns.Address().IP.String()
-	if _, found := r.lookup[addrstr]; !found {
+	if !r.hasAddr(addrstr) {
 		r.list = append(r.list, ns)
-		r.lookup[addrstr] = ns
+		r.addAddrEntry(addrstr, ns)
 	}
 }
 
@@ -60,8 +60,8 @@ func (r *random) Remove(ns types.Nameserver) {
 	defer r.Unlock()
 
 	addrstr := ns.Address().IP.String()
-	if _, found := r.lookup[addrstr]; found {
-		delete(r.lookup, addrstr)
+	if r.hasAddr(addrstr) {
+		r.removeAddrEntry(addrstr)
 
 		for i, n := range r.list {
 			if n == ns {
@@ -125,4 +125,26 @@ func (r *random) timeouts() {
 
 		t.Reset(r.timeout)
 	}
+}
+
+func (r *random) hasAddr(addr string) bool {
+	r.lookupLock.Lock()
+	defer r.lookupLock.Unlock()
+
+	_, found := r.lookup[addr]
+	return found
+}
+
+func (r *random) addAddrEntry(addr string, ns types.Nameserver) {
+	r.lookupLock.Lock()
+	defer r.lookupLock.Unlock()
+
+	r.lookup[addr] = ns
+}
+
+func (r *random) removeAddrEntry(addr string) {
+	r.lookupLock.Lock()
+	defer r.lookupLock.Unlock()
+
+	delete(r.lookup, addr)
 }
