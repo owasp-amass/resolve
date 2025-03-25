@@ -90,10 +90,11 @@ func (r *request) SendResponse(resp *dns.Msg) { r.resp <- resp }
 
 func (r *request) NoResponse() {
 	r.Lock()
-	defer r.Unlock()
+	resp := r.msg
+	r.Unlock()
 
-	r.msg.Rcode = RcodeNoResponse
-	r.resp <- r.msg
+	resp.Rcode = RcodeNoResponse
+	r.resp <- resp
 }
 
 func (r *request) Release() {

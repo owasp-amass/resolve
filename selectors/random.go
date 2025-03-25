@@ -84,12 +84,7 @@ func (r *random) All() []types.Nameserver {
 func (r *random) Close() {
 	close(r.done)
 
-	r.Lock()
-	all := make([]types.Nameserver, 0, len(r.list))
-	_ = copy(all, r.list)
-	r.Unlock()
-
-	for _, ns := range all {
+	for _, ns := range r.All() {
 		r.Remove(ns)
 		ns.Close()
 	}
@@ -109,12 +104,7 @@ func (r *random) timeouts() {
 		case <-t.C:
 		}
 
-		r.Lock()
-		cp := make([]types.Nameserver, 0, len(r.list))
-		_ = copy(cp, r.list)
-		r.Unlock()
-
-		for _, ns := range cp {
+		for _, ns := range r.All() {
 			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
 				go func(req types.Request) {
 					req.NoResponse()
