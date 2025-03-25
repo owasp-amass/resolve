@@ -7,8 +7,6 @@ package conn
 import (
 	"errors"
 	"fmt"
-	"math/rand"
-	"net"
 	"time"
 
 	"github.com/miekg/dns"
@@ -17,22 +15,23 @@ import (
 
 type Conn struct {
 	done  chan struct{}
-	conns []*connection
+	conns chan *connection
 	sel   types.Selector
 	cpus  int
 }
 
 func New(cpus int, sel types.Selector) *Conn {
 	conn := &Conn{
-		done: make(chan struct{}),
-		sel:  sel,
-		cpus: cpus,
+		done:  make(chan struct{}),
+		conns: make(chan *connection, cpus),
+		sel:   sel,
+		cpus:  cpus,
 	}
 
 	for i := 0; i < cpus; {
 		if c := newConnection(sel.Lookup); c != nil {
 			i++
-			conn.conns = append(conn.conns, c)
+			conn.conns <- c
 		}
 	}
 	return conn
@@ -41,15 +40,28 @@ func New(cpus int, sel types.Selector) *Conn {
 func (r *Conn) Close() {
 	close(r.done)
 
-	for _, c := range r.conns {
+	for i := 0; i < r.cpus; i++ {
+		c := <-r.conns
 		c.close()
 	}
 }
 
-func (r *Conn) getPacketConn() (net.PacketConn, error) {
-	idx := rand.Intn(r.cpus)
+func (r *Conn) get() *connection {
+	c := <-r.conns
 
-	return r.conns[idx].get()
+	c.count++
+	return c
+}
+
+func (r *Conn) put(c *connection) {
+	n := c
+
+	if c.expired() {
+		go c.delayedClose()
+		n = newConnection(r.sel.Lookup)
+	}
+
+	r.conns <- n
 }
 
 func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
@@ -64,10 +76,8 @@ func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 		return err
 	}
 
-	c, err := r.getPacketConn()
-	if err != nil {
-		return err
-	}
+	c := r.get()
+	defer r.put(c)
 
 	err = ns.XchgManager().Modify(msg.Id, msg.Question[0].Name, func(req types.Request) {
 		req.SetSentAt(time.Now())
@@ -76,8 +86,8 @@ func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 		return err
 	}
 
-	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	n, err := c.WriteTo(out, ns.Address())
+	_ = c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	n, err := c.conn.WriteTo(out, ns.Address())
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 	}

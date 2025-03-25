@@ -5,10 +5,8 @@
 package conn
 
 import (
-	"errors"
 	"math/rand"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -18,13 +16,12 @@ import (
 
 const (
 	headerSize = 12
-	maxWrites  = 100
-	maxJitter  = 10
+	maxWrites  = 25
+	maxJitter  = 5
 	expiredAt  = 3 * time.Second
 )
 
 type connection struct {
-	sync.Mutex
 	done      chan struct{}
 	conn      net.PacketConn
 	count     int
@@ -50,36 +47,6 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 	return c
 }
 
-func (c *connection) close() {
-	c.Lock()
-	defer c.Unlock()
-
-	select {
-	case <-c.done:
-	default:
-		close(c.done)
-		_ = c.conn.Close()
-	}
-}
-
-func (c *connection) get() (net.PacketConn, error) {
-	select {
-	case <-c.done:
-		return nil, errors.New("the connection has been closed")
-	default:
-	}
-
-	c.Lock()
-	defer c.Unlock()
-
-	c.count++
-	if c.expired() {
-		c.createdAt = time.Now()
-		c.count = rand.Intn(maxJitter) + 1
-	}
-	return c.conn, nil
-}
-
 func newPacketConn() (net.PacketConn, error) {
 	var err error
 	var success bool
@@ -103,6 +70,20 @@ func newPacketConn() (net.PacketConn, error) {
 	return pc, nil
 }
 
+func (c *connection) close() {
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+		_ = c.conn.Close()
+	}
+}
+
+func (c *connection) delayedClose() {
+	time.Sleep(2 * time.Second)
+	c.close()
+}
+
 func (c *connection) expired() bool {
 	return c.count >= maxWrites || time.Since(c.createdAt) > expiredAt
 }
@@ -115,11 +96,7 @@ func (c *connection) responses() {
 		default:
 		}
 
-		c.Lock()
-		pc := c.conn
-		c.Unlock()
-
-		c.handleSingleMessage(pc)
+		c.handleSingleMessage(c.conn)
 	}
 }
 
