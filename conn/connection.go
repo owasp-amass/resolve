@@ -11,7 +11,6 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
-	"github.com/owasp-amass/resolve/utils"
 )
 
 const (
@@ -49,21 +48,14 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 
 func newPacketConn() (net.PacketConn, error) {
 	var err error
-	var success bool
 	var pc net.PacketConn
 
-	for i := 0; i < 10; i++ {
+	for {
 		pc, err = net.ListenPacket("udp", ":0")
 		if err == nil {
-			success = true
 			break
 		}
-
-		backoff := utils.ExponentialBackoff(i, 250*time.Millisecond)
-		time.Sleep(backoff)
-	}
-	if !success {
-		return nil, err
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	_ = pc.SetDeadline(time.Time{})
@@ -76,6 +68,7 @@ func (c *connection) close() {
 	default:
 		close(c.done)
 		_ = c.conn.Close()
+		c.conn = nil
 	}
 }
 
@@ -85,7 +78,7 @@ func delayedClose(c *connection) {
 }
 
 func (c *connection) expired() bool {
-	return c.count >= maxWrites || time.Since(c.createdAt) > expiredAt
+	return c.count >= maxWrites && time.Since(c.createdAt) > expiredAt
 }
 
 func (c *connection) responses() {

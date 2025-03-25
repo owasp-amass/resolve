@@ -52,12 +52,11 @@ func (r *Conn) get() *connection {
 
 	select {
 	case c := <-r.conns:
-		c.count++
-		return c
-	case <-t.C:
-		if n := newConnection(r.sel.Lookup); n != nil {
-			return n
+		if c != nil {
+			c.count++
+			return c
 		}
+	case <-t.C:
 	}
 	return nil
 }
@@ -69,11 +68,7 @@ func (r *Conn) put(c *connection) {
 	}
 
 	if c != nil {
-		select {
-		case r.conns <- c:
-		default:
-			go delayedClose(c)
-		}
+		r.conns <- c
 	}
 }
 
