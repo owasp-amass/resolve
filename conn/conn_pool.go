@@ -47,9 +47,19 @@ func (r *Conn) Close() {
 }
 
 func (r *Conn) get() *connection {
-	c := <-r.conns
-	c.count++
-	return c
+	t := time.NewTimer(time.Second)
+	defer t.Stop()
+
+	select {
+	case c := <-r.conns:
+		c.count++
+		return c
+	case <-t.C:
+		if n := newConnection(r.sel.Lookup); n != nil {
+			return n
+		}
+	}
+	return nil
 }
 
 func (r *Conn) put(c *connection) {
@@ -57,8 +67,13 @@ func (r *Conn) put(c *connection) {
 		go delayedClose(c)
 		c = newConnection(r.sel.Lookup)
 	}
+
 	if c != nil {
-		r.conns <- c
+		select {
+		case r.conns <- c:
+		default:
+			go delayedClose(c)
+		}
 	}
 }
 
@@ -75,16 +90,21 @@ func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 	}
 
 	c := r.get()
+	if c == nil {
+		return errors.New("failed to obtain a connection")
+	}
 	defer r.put(c)
 
-	err = ns.XchgManager().Modify(msg.Id, msg.Question[0].Name, func(req types.Request) {
+	if err := ns.XchgManager().Modify(msg.Id, msg.Question[0].Name, func(req types.Request) {
 		req.SetSentAt(time.Now())
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
-	_ = c.conn.SetWriteDeadline(time.Now().Add(time.Second))
+	if err := c.conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		return err
+	}
+
 	n, err := c.conn.WriteTo(out, ns.Address())
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
