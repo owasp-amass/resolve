@@ -48,20 +48,18 @@ func (r *Conn) Close() {
 
 func (r *Conn) get() *connection {
 	c := <-r.conns
-
 	c.count++
 	return c
 }
 
 func (r *Conn) put(c *connection) {
-	n := c
-
 	if c.expired() {
-		go c.delayedClose()
-		n = newConnection(r.sel.Lookup)
+		go delayedClose(c)
+		c = newConnection(r.sel.Lookup)
 	}
-
-	r.conns <- n
+	if c != nil {
+		r.conns <- c
+	}
 }
 
 func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
@@ -86,7 +84,7 @@ func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 		return err
 	}
 
-	_ = c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(time.Second))
 	n, err := c.conn.WriteTo(out, ns.Address())
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))

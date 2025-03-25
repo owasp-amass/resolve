@@ -18,7 +18,7 @@ const (
 	headerSize = 12
 	maxWrites  = 25
 	maxJitter  = 5
-	expiredAt  = 3 * time.Second
+	expiredAt  = 2 * time.Second
 )
 
 type connection struct {
@@ -36,7 +36,7 @@ func newConnection(lookup func(addr string) types.Nameserver) *connection {
 	}
 
 	c := &connection{
-		done:      make(chan struct{}),
+		done:      make(chan struct{}, 1),
 		conn:      pc,
 		count:     rand.Intn(maxJitter) + 1,
 		createdAt: time.Now(),
@@ -79,8 +79,8 @@ func (c *connection) close() {
 	}
 }
 
-func (c *connection) delayedClose() {
-	time.Sleep(2 * time.Second)
+func delayedClose(c *connection) {
+	time.Sleep(time.Second)
 	c.close()
 }
 
