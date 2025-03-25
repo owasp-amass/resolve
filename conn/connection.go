@@ -74,34 +74,11 @@ func (c *connection) get() (net.PacketConn, error) {
 
 	c.count++
 	if c.expired() {
-		//go c.rotatePacketConn()
 		c.createdAt = time.Now()
 		c.count = rand.Intn(maxJitter) + 1
 	}
 	return c.conn, nil
 }
-
-/*
-	func (c *connection) rotatePacketConn() {
-		select {
-		case <-c.done:
-			return
-		default:
-		}
-
-		pc, err := newPacketConn()
-		if err != nil {
-			return
-		}
-
-		c.Lock()
-		defer c.Unlock()
-
-		o := c.conn
-		c.conn = pc
-		_ = o.Close()
-	}
-*/
 
 func newPacketConn() (net.PacketConn, error) {
 	var err error
@@ -131,8 +108,6 @@ func (c *connection) expired() bool {
 }
 
 func (c *connection) responses() {
-	b := make([]byte, dns.DefaultMsgSize)
-
 	for {
 		select {
 		case <-c.done:
@@ -144,13 +119,19 @@ func (c *connection) responses() {
 		pc := c.conn
 		c.Unlock()
 
-		if n, addr, err := pc.ReadFrom(b); err == nil && n >= headerSize {
-			at := time.Now()
+		c.handleSingleMessage(pc)
+	}
+}
 
-			m := new(dns.Msg)
-			if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
-				go c.processResponse(m, addr, at)
-			}
+func (c *connection) handleSingleMessage(pc net.PacketConn) {
+	b := make([]byte, dns.DefaultMsgSize)
+
+	if n, addr, err := pc.ReadFrom(b); err == nil && n >= headerSize {
+		at := time.Now()
+
+		m := new(dns.Msg)
+		if err := m.Unpack(b[:n]); err == nil && len(m.Question) > 0 {
+			go c.processResponse(m, addr, at)
 		}
 	}
 }
