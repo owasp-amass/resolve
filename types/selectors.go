@@ -6,16 +6,10 @@ package types
 
 type Selector interface {
 	// Get returns a nameserverr managed by the selector.
-	Get(fqdn string) Nameserver
+	Get(fqdn string) (Nameserver, error)
 
 	// Lookup returns the nameserver with the matching address.
-	Lookup(addr string) Nameserver
-
-	// Add adds a nameserver to the selector pool.
-	Add(ns Nameserver)
-
-	// Remove removes a nameserver from the selector pool.
-	Remove(ns Nameserver)
+	Lookup(addr string) (Nameserver, error)
 
 	// All returns all the nameservers currently managed by the selector.
 	All() []Nameserver

@@ -82,7 +82,7 @@ func TestTCPExchange(t *testing.T) {
 	defer p.Stop()
 	defer sel.Close()
 	defer conns.Close()
-	serv := p.Selector.Get(name)
+	serv, _ := p.Selector.Get(name)
 
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)
@@ -118,7 +118,7 @@ func TestBadTCPExchange(t *testing.T) {
 	defer p.Stop()
 	defer sel.Close()
 	defer conns.Close()
-	serv := p.Selector.Get(name)
+	serv, _ := p.Selector.Get(name)
 
 	ch := make(chan *dns.Msg, 1)
 	defer close(ch)

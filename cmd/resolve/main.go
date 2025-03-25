@@ -168,10 +168,11 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 	} else if llen == 1 {
 		sel = selectors.NewSingle(delay, servers.NewNameserver(list[0]))
 	} else {
-		sel = selectors.NewRandom(delay)
+		var servs []types.Nameserver
 		for _, addrstr := range list {
-			sel.Add(servers.NewNameserver(addrstr))
+			servs = append(servs, servers.NewNameserver(addrstr))
 		}
+		sel = selectors.NewRandom(delay, servs...)
 	}
 
 	conns := conn.New(runtime.NumCPU(), sel)

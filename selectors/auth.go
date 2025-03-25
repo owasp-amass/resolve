@@ -5,6 +5,7 @@
 package selectors
 
 import (
+	"errors"
 	"math/rand"
 	"net"
 	"strings"
@@ -69,25 +70,28 @@ func NewAuthoritative(timeout time.Duration, newserver NewServer) *authoritative
 }
 
 // Get performs selection of the correct nameserver in the pool.
-func (r *authoritative) Get(fqdn string) types.Nameserver {
+func (r *authoritative) Get(fqdn string) (types.Nameserver, error) {
+	select {
+	case <-r.done:
+		return nil, errors.New("the selector has been closed")
+	default:
+	}
+
 	r.Lock()
 	defer r.Unlock()
 
 	name := strings.ToLower(utils.RemoveLastDot(fqdn))
-	if ns := r.checkFQDNAndMinusOne(name); ns != nil {
-		return ns
+	if ns, err := r.checkFQDNAndMinusOne(name); err == nil {
+		return ns, nil
 	}
 
 	r.populateAuthServers(name)
-	if res := r.checkFQDNAndMinusOne(name); res != nil {
-		return res
-	}
-	return nil
+	return r.checkFQDNAndMinusOne(name)
 }
 
-func (r *authoritative) checkFQDNAndMinusOne(fqdn string) types.Nameserver {
+func (r *authoritative) checkFQDNAndMinusOne(fqdn string) (types.Nameserver, error) {
 	if servers, found := r.fqdnToNSs[fqdn]; found {
-		return pickOneServer(servers)
+		return pickOneServer(servers), nil
 	}
 
 	labels := strings.Split(fqdn, ".")
@@ -96,47 +100,34 @@ func (r *authoritative) checkFQDNAndMinusOne(fqdn string) types.Nameserver {
 	}
 
 	if servers, found := r.fqdnToNSs[fqdn]; found {
-		return pickOneServer(servers)
+		return pickOneServer(servers), nil
 	}
-	return nil
+	return nil, errors.New("the selector does not have the requested nameserver")
 }
 
-func (r *authoritative) Lookup(addr string) types.Nameserver {
+func (r *authoritative) Lookup(addr string) (types.Nameserver, error) {
+	select {
+	case <-r.done:
+		return nil, errors.New("the selector has been closed")
+	default:
+	}
+
 	r.Lock()
 	defer r.Unlock()
 
-	return r.lookup[addr]
-}
-
-func (r *authoritative) Add(ns types.Nameserver) {
-	r.Lock()
-	defer r.Unlock()
-
-	addrstr := ns.Address().IP.String()
-	if _, found := r.lookup[addrstr]; !found {
-		r.list = append(r.list, ns)
-		r.lookup[addrstr] = ns
+	if ns, found := r.lookup[addr]; found {
+		return ns, nil
 	}
-}
-
-func (r *authoritative) Remove(ns types.Nameserver) {
-	r.Lock()
-	defer r.Unlock()
-
-	addrstr := ns.Address().IP.String()
-	if _, found := r.lookup[addrstr]; found {
-		delete(r.lookup, addrstr)
-
-		for i, n := range r.list {
-			if n == ns {
-				r.list = append(r.list[:i], r.list[i+1:]...)
-				break
-			}
-		}
-	}
+	return nil, errors.New("the selector does not have the requested nameserver")
 }
 
 func (r *authoritative) All() []types.Nameserver {
+	select {
+	case <-r.done:
+		return nil
+	default:
+	}
+
 	r.Lock()
 	defer r.Unlock()
 
@@ -148,13 +139,7 @@ func (r *authoritative) All() []types.Nameserver {
 func (r *authoritative) Close() {
 	close(r.done)
 
-	r.Lock()
-	all := make([]types.Nameserver, 0, len(r.list))
-	_ = copy(all, r.list)
-	r.Unlock()
-
-	for _, ns := range all {
-		r.Remove(ns)
+	for _, ns := range r.All() {
 		ns.Close()
 	}
 
@@ -312,12 +297,7 @@ func (r *authoritative) timeouts() {
 		case <-t.C:
 		}
 
-		r.Lock()
-		cp := make([]types.Nameserver, 0, len(r.list))
-		_ = copy(cp, r.list)
-		r.Unlock()
-
-		for _, ns := range cp {
+		for _, ns := range r.All() {
 			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
 				go func(req types.Request) {
 					req.NoResponse()

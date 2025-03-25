@@ -5,17 +5,27 @@
 package selectors
 
 import (
+	"errors"
 	"math/rand"
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewRandom(timeout time.Duration) *random {
+func NewRandom(timeout time.Duration, servs ...types.Nameserver) *random {
+	if len(servs) == 0 {
+		return nil
+	}
+
 	r := &random{
 		done:    make(chan struct{}, 1),
 		timeout: timeout,
 		lookup:  make(map[string]types.Nameserver),
+	}
+
+	for _, ns := range servs {
+		r.list = append(r.list, ns)
+		r.lookup[ns.Address().IP.String()] = ns
 	}
 
 	go r.timeouts()
@@ -23,69 +33,49 @@ func NewRandom(timeout time.Duration) *random {
 }
 
 // Get performs random selection on the pool of nameservers.
-func (r *random) Get(fqdn string) types.Nameserver {
-	r.Lock()
-	defer r.Unlock()
+func (r *random) Get(fqdn string) (types.Nameserver, error) {
+	select {
+	case <-r.done:
+		return nil, errors.New("the selector has been closed")
+	default:
+	}
 
 	if l := len(r.list); l == 0 {
-		return nil
+		return nil, errors.New("the selector has no nameservers")
 	} else if l == 1 {
-		return r.list[0]
+		return r.list[0], nil
 	}
 
 	sel := rand.Intn(len(r.list))
-	return r.list[sel]
+	return r.list[sel], nil
 }
 
-func (r *random) Lookup(addr string) types.Nameserver {
-	r.lookupLock.Lock()
-	defer r.lookupLock.Unlock()
-
-	return r.lookup[addr]
-}
-
-func (r *random) Add(ns types.Nameserver) {
-	r.Lock()
-	defer r.Unlock()
-
-	addrstr := ns.Address().IP.String()
-	if !r.hasAddr(addrstr) {
-		r.list = append(r.list, ns)
-		r.addAddrEntry(addrstr, ns)
+func (r *random) Lookup(addr string) (types.Nameserver, error) {
+	select {
+	case <-r.done:
+		return nil, errors.New("the selector has been closed")
+	default:
 	}
-}
 
-func (r *random) Remove(ns types.Nameserver) {
-	r.Lock()
-	defer r.Unlock()
-
-	addrstr := ns.Address().IP.String()
-	if r.hasAddr(addrstr) {
-		r.removeAddrEntry(addrstr)
-
-		for i, n := range r.list {
-			if n == ns {
-				r.list = append(r.list[:i], r.list[i+1:]...)
-				break
-			}
-		}
+	if ns, found := r.lookup[addr]; found {
+		return ns, nil
 	}
+	return nil, errors.New("the selector does not have the requested nameserver")
 }
 
 func (r *random) All() []types.Nameserver {
-	r.Lock()
-	defer r.Unlock()
-
-	all := make([]types.Nameserver, 0, len(r.list))
-	_ = copy(all, r.list)
-	return all
+	select {
+	case <-r.done:
+		return nil
+	default:
+	}
+	return r.list
 }
 
 func (r *random) Close() {
 	close(r.done)
 
 	for _, ns := range r.All() {
-		r.Remove(ns)
 		ns.Close()
 	}
 
@@ -115,26 +105,4 @@ func (r *random) timeouts() {
 
 		t.Reset(r.timeout)
 	}
-}
-
-func (r *random) hasAddr(addr string) bool {
-	r.lookupLock.Lock()
-	defer r.lookupLock.Unlock()
-
-	_, found := r.lookup[addr]
-	return found
-}
-
-func (r *random) addAddrEntry(addr string, ns types.Nameserver) {
-	r.lookupLock.Lock()
-	defer r.lookupLock.Unlock()
-
-	r.lookup[addr] = ns
-}
-
-func (r *random) removeAddrEntry(addr string) {
-	r.lookupLock.Lock()
-	defer r.lookupLock.Unlock()
-
-	delete(r.lookup, addr)
 }

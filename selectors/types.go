@@ -18,12 +18,10 @@ type single struct {
 }
 
 type random struct {
-	sync.Mutex
-	done       chan struct{}
-	timeout    time.Duration
-	list       []types.Nameserver
-	lookupLock sync.Mutex
-	lookup     map[string]types.Nameserver
+	done    chan struct{}
+	timeout time.Duration
+	list    []types.Nameserver
+	lookup  map[string]types.Nameserver
 }
 
 type authoritative struct {

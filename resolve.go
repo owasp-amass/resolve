@@ -22,10 +22,11 @@ func NewServerPool(timeout time.Duration, logger *log.Logger, addrs ...string) *
 	if len(addrs) == 0 {
 		sel = selectors.NewAuthoritative(timeout, servers.NewNameserver)
 	} else {
-		sel = selectors.NewRandom(timeout)
+		var servs []types.Nameserver
 		for _, addrstr := range addrs {
-			sel.Add(servers.NewNameserver(addrstr))
+			servs = append(servs, servers.NewNameserver(addrstr))
 		}
+		sel = selectors.NewRandom(timeout, servs...)
 	}
 
 	conns := conn.New(runtime.NumCPU(), sel)

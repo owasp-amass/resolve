@@ -21,11 +21,9 @@ func NewSingle(timeout time.Duration, serv types.Nameserver) *single {
 	return r
 }
 
-func (r *single) Get(fqdn string) types.Nameserver    { return r.server }
-func (r *single) Lookup(addr string) types.Nameserver { return r.server }
-func (r *single) Add(ns types.Nameserver)             {}
-func (r *single) Remove(ns types.Nameserver)          {}
-func (r *single) All() []types.Nameserver             { return []types.Nameserver{r.server} }
+func (r *single) Get(fqdn string) (types.Nameserver, error)    { return r.server, nil }
+func (r *single) Lookup(addr string) (types.Nameserver, error) { return r.server, nil }
+func (r *single) All() []types.Nameserver                      { return []types.Nameserver{r.server} }
 
 func (r *single) Close() {
 	close(r.done)

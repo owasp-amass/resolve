@@ -22,10 +22,10 @@ type connection struct {
 	done      chan struct{}
 	conn      net.PacketConn
 	createdAt time.Time
-	lookup    func(addr string) types.Nameserver
+	lookup    func(addr string) (types.Nameserver, error)
 }
 
-func newConnection(lookup func(addr string) types.Nameserver) *connection {
+func newConnection(lookup func(addr string) (types.Nameserver, error)) *connection {
 	pc, err := net.ListenPacket("udp", ":0")
 	if err != nil {
 		return nil
@@ -89,7 +89,7 @@ func (c *connection) handleSingleMessage(pc net.PacketConn) {
 func (c *connection) processResponse(msg *dns.Msg, addr net.Addr, at time.Time) {
 	a, _, _ := net.SplitHostPort(addr.String())
 
-	if serv := c.lookup(a); serv != nil {
+	if serv, err := c.lookup(a); err == nil {
 		serv.RequestResponse(msg, at)
 	}
 }

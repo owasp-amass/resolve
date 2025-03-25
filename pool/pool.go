@@ -105,7 +105,7 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 func (r *Pool) processSingleReq(req types.Request) {
 	name := req.Message().Question[0].Name
 
-	if serv := r.Selector.Get(name); serv != nil {
+	if serv, err := r.Selector.Get(name); err == nil {
 		_ = r.rate.Wait(context.TODO())
 
 		if err := serv.SendRequest(req, r.Conns); err == nil {
