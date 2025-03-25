@@ -5,7 +5,6 @@
 package conn
 
 import (
-	"math/rand"
 	"net"
 	"time"
 
@@ -15,51 +14,32 @@ import (
 
 const (
 	headerSize = 12
-	maxWrites  = 25
-	maxJitter  = 5
-	expiredAt  = 2 * time.Second
+	expiredAt  = 10 * time.Second
 )
 
 type connection struct {
 	done      chan struct{}
 	conn      net.PacketConn
-	count     int
 	createdAt time.Time
 	lookup    func(addr string) types.Nameserver
 }
 
 func newConnection(lookup func(addr string) types.Nameserver) *connection {
-	pc, err := newPacketConn()
+	pc, err := net.ListenPacket("udp", ":0")
 	if err != nil {
 		return nil
 	}
+	_ = pc.SetDeadline(time.Time{})
 
 	c := &connection{
 		done:      make(chan struct{}, 1),
 		conn:      pc,
-		count:     rand.Intn(maxJitter) + 1,
 		createdAt: time.Now(),
 		lookup:    lookup,
 	}
 
 	go c.responses()
 	return c
-}
-
-func newPacketConn() (net.PacketConn, error) {
-	var err error
-	var pc net.PacketConn
-
-	for {
-		pc, err = net.ListenPacket("udp", ":0")
-		if err == nil {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	_ = pc.SetDeadline(time.Time{})
-	return pc, nil
 }
 
 func (c *connection) close() {
@@ -78,7 +58,7 @@ func delayedClose(c *connection) {
 }
 
 func (c *connection) expired() bool {
-	return c.count >= maxWrites && time.Since(c.createdAt) > expiredAt
+	return time.Since(c.createdAt) > expiredAt
 }
 
 func (c *connection) responses() {

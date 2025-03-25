@@ -53,7 +53,6 @@ func (r *Conn) get() *connection {
 	select {
 	case c := <-r.conns:
 		if c != nil {
-			c.count++
 			return c
 		}
 	case <-t.C:
