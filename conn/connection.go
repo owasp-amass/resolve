@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	headerSize = 12
-	expiredAt  = 10 * time.Second
+	headerSize      = 12
+	expiredAt       = 5 * time.Second
+	connectionDelay = 2 * time.Second
 )
 
 type connection struct {
@@ -52,7 +53,7 @@ func (c *connection) close() {
 }
 
 func delayedClose(c *connection) {
-	time.Sleep(time.Second)
+	time.Sleep(connectionDelay)
 	c.close()
 }
 
@@ -67,7 +68,6 @@ func (c *connection) responses() {
 			return
 		default:
 		}
-
 		c.handleSingleMessage(c.conn)
 	}
 }
@@ -75,7 +75,7 @@ func (c *connection) responses() {
 func (c *connection) handleSingleMessage(pc net.PacketConn) {
 	b := make([]byte, dns.DefaultMsgSize)
 
-	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = pc.SetReadDeadline(time.Now().Add(connectionDelay))
 	if n, addr, err := pc.ReadFrom(b); err == nil && n >= headerSize {
 		at := time.Now()
 
