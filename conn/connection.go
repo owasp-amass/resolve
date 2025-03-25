@@ -14,7 +14,7 @@ import (
 
 const (
 	headerSize = 12
-	expiredAt  = 1 * time.Second
+	expiredAt  = 10 * time.Second
 )
 
 type connection struct {
@@ -75,6 +75,7 @@ func (c *connection) responses() {
 func (c *connection) handleSingleMessage(pc net.PacketConn) {
 	b := make([]byte, dns.DefaultMsgSize)
 
+	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if n, addr, err := pc.ReadFrom(b); err == nil && n >= headerSize {
 		at := time.Now()
 
