@@ -162,13 +162,13 @@ func TestSetupFiles(t *testing.T) {
 				t.Errorf("Failed while expecting: %s", c.expected[1])
 			}
 			if c.expected[0] != "/dev/stderr" {
-				p.LogFile.Close()
+				_ = p.LogFile.Close()
 			}
 			if p.Output != nil && c.expected[1] != "/dev/stdout" {
-				p.Output.Close()
+				_ = p.Output.Close()
 			}
 			if c.expected[2] != "/dev/stdin" {
-				p.Input.Close()
+				_ = p.Input.Close()
 			}
 		}
 		t.Run(c.label, f)
@@ -176,7 +176,7 @@ func TestSetupFiles(t *testing.T) {
 	// Remove the files and test for errors
 	for i, f := range []*os.File{logfile, output, input} {
 		name := f.Name()
-		os.Remove(name)
+		_ = os.Remove(name)
 
 		p := new(params)
 		if i == 2 && p.SetupFiles("", "", name) == nil {

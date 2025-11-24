@@ -47,7 +47,7 @@ func ResolverFileList(p string) []string {
 	defer set.Close()
 
 	if input, err := os.Open(p); err == nil {
-		defer input.Close()
+		defer func() { _ = input.Close() }()
 
 		if err := ExtractLines(input, func(str string) error {
 			set.Insert(str)

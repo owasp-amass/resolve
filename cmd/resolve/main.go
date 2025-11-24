@@ -228,14 +228,14 @@ func EventLoop(p *params) {
 			if e, ok := finished.Next(); ok && e != nil {
 				processing--
 				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
-					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+					_, _ = fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
 				}
 			}
 		case <-t.C:
 			if e, ok := finished.Next(); ok && e != nil {
 				processing--
 				if msg, ok := e.(*dns.Msg); ok && msg.Rcode != types.RcodeNoResponse {
-					fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
+					_, _ = fmt.Fprintf(p.Output, "\n%s\n", e.(*dns.Msg))
 				}
 			}
 		}

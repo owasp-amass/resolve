@@ -56,7 +56,7 @@ func RunLocalServer(pc net.PacketConn, l net.Listener, opts ...func(*dns.Server)
 
 	go func() {
 		fin <- server.ActivateAndServe()
-		closer.Close()
+		_ = closer.Close()
 	}()
 
 	waitLock.Lock()
