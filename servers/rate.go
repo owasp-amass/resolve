@@ -77,7 +77,7 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 	}
 
 	if rtt < rl.limit {
-		rl.limit = rtt
+		rl.limit -= time.Millisecond
 		rl.limiter.SetLimit(rate.Every(rl.limit))
 	}
 	rl.errors = 0
