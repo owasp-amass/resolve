@@ -5,35 +5,40 @@
 package servers
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 func TestUpdateRateLimiters(t *testing.T) {
 	rt := newRateTrack()
-	rt.Take()
-
-	rt.ReportRTT(500 * time.Millisecond)
+	_ = rt.Wait(context.Background(), 1)
 
 	rt.Lock()
-	limit := rt.limiter.Limit()
+	start := rt.rrLimiters[1].limiter.Limit()
+	rt.Unlock()
+
+	rt.ReportResponse(1, dns.RcodeRefused, time.Duration(0))
+
+	rt.Lock()
+	first := rt.rrLimiters[1].limiter.Limit()
 	rt.Unlock()
 	// the QPS should now be lower
-	if limit > 3 {
-		t.Errorf("Unexpected QPS, expected QPS lower than %d, got %f", 3, limit)
+	if first >= start {
+		t.Errorf("Unexpected QPS, expected QPS lower than %f, got %f", start, first)
 	}
 
-	rt.Lock()
-	rt.avg = 50 * time.Millisecond
-	rt.count = minUpdateSampleSize
-	rt.Unlock()
-	rt.update()
+	_ = rt.Wait(context.Background(), 1)
+	rt.ReportResponse(1, dns.RcodeSuccess, 10*time.Millisecond)
 
 	rt.Lock()
-	limit = rt.limiter.Limit()
+	second := rt.rrLimiters[1].limiter.Limit()
 	rt.Unlock()
+
 	// the QPS should now be higher
-	if limit < maxLimit || limit > maxLimit+1 {
-		t.Errorf("Unexpected QPS, expected QPS of %d, got %f", 15, limit)
+	if second <= first || second != 100 {
+		t.Errorf("Unexpected QPS, expected QPS of %d, got %f", 100, second)
 	}
 }

@@ -19,12 +19,16 @@ type nameserver struct {
 	rate  *rateTrack
 }
 
+type rrLimiter struct {
+	limiter *rate.Limiter
+	limit   time.Duration
+	errors  int
+}
+
 type rateTrack struct {
 	sync.Mutex
-	limiter *rate.Limiter
-	avg     time.Duration
-	count   int
-	first   bool
+	rrLimiters   map[uint16]*rrLimiter
+	lastResponse time.Time
 }
 
 // The xchgMgr handles DNS message IDs and identifying messages that have timed out.

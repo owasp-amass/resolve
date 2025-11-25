@@ -5,6 +5,7 @@
 package types
 
 import (
+	"context"
 	"net"
 	"time"
 
@@ -22,8 +23,8 @@ type Nameserver interface {
 }
 
 type RateTrack interface {
-	Take()
-	ReportRTT(rtt time.Duration)
+	Wait(ctx context.Context, rrType uint16) error
+	ReportResponse(rrType uint16, rCode int, rtt time.Duration)
 }
 
 // XchgManager handles DNS message IDs and identifying messages that have timed out.

@@ -6,68 +6,79 @@ package servers
 
 import (
 	"context"
-	"math"
+	"errors"
 	"time"
 
+	"github.com/miekg/dns"
+	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 	"golang.org/x/time/rate"
 )
 
 const (
-	minLimit            = 1
-	maxLimit            = 20
-	minUpdateSampleSize = 10
-	maxInterval         = time.Second
+	maxLimit      = 100 * time.Millisecond
+	startingLimit = 20 * time.Millisecond
 )
 
 func newRateTrack() *rateTrack {
-	limit := rate.Every(100 * time.Millisecond)
-
 	return &rateTrack{
-		limiter: rate.NewLimiter(limit, 1),
-		first:   true,
+		rrLimiters: make(map[uint16]*rrLimiter),
 	}
 }
 
-// Take blocks as long as required by the rate limiter.
-func (r *rateTrack) Take() {
-	_ = r.limiter.Wait(context.TODO())
+func newRRLimiter() *rrLimiter {
+	return &rrLimiter{
+		limit:   startingLimit,
+		limiter: rate.NewLimiter(rate.Every(startingLimit), 1),
+	}
 }
 
-// ReportRTT accepts a round-trip-time for a DNS query request.
-func (r *rateTrack) ReportRTT(rtt time.Duration) {
+// Wait blocks as long as required by the rate limiter.
+func (r *rateTrack) Wait(ctx context.Context, rrType uint16) error {
+	if rrType <= dns.TypeNone || rrType > dns.TypeANY {
+		return errors.New("invalid RR type for rate limiting")
+	}
+
+	r.Lock()
+	rl, found := r.rrLimiters[rrType]
+	if !found {
+		rl = newRRLimiter()
+		r.rrLimiters[rrType] = rl
+	}
+	r.Unlock()
+
+	return rl.limiter.Wait(ctx)
+}
+
+// ReportResponse accepts response information for a DNS query request.
+func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) {
+	if rrType <= dns.TypeNone || rrType > dns.TypeANY {
+		return
+	}
+	if rCode < dns.RcodeSuccess || rCode > dns.RcodeBadCookie {
+		return
+	}
+
 	r.Lock()
 	defer r.Unlock()
 
-	if rtt > maxInterval {
-		rtt = maxInterval
+	rl, found := r.rrLimiters[rrType]
+	if !found {
+		rl = newRRLimiter()
+		r.rrLimiters[rrType] = rl
 	}
 
-	r.count++
-	count := float64(r.count)
-	average := float64(r.avg.Milliseconds())
-	average = ((average * (count - 1)) + float64(rtt.Milliseconds())) / count
-	r.avg = time.Duration(math.Round(average)) * time.Millisecond
-	first := r.first
-
-	if first {
-		r.update()
-		r.first = false
-	} else if r.count >= minUpdateSampleSize {
-		r.update()
-	}
-}
-
-// update the QPS rate limiter and reset counters
-func (r *rateTrack) update() {
-	limit := rate.Every(r.avg)
-
-	if limit > maxLimit {
-		limit = maxLimit
-	} else if limit < minLimit {
-		limit = minLimit
+	r.lastResponse = time.Now()
+	if rCode == dns.RcodeServerFailure || rCode == dns.RcodeRefused || rCode == types.RcodeNoResponse {
+		rl.errors++
+		rl.limit += utils.TruncatedExponentialBackoff(rl.errors, time.Millisecond, maxLimit-rl.limit)
+		rl.limiter.SetLimit(rate.Every(rl.limit))
+		return
 	}
 
-	r.limiter.SetLimit(limit)
-	r.avg = 0
-	r.count = 0
+	if rtt < rl.limit {
+		rl.limit = rtt
+		rl.limiter.SetLimit(rate.Every(rl.limit))
+	}
+	rl.errors = 0
 }

@@ -5,6 +5,7 @@
 package servers
 
 import (
+	"context"
 	"errors"
 	"net"
 	"time"
@@ -68,7 +69,10 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 		return err
 	}
 
-	ns.rate.Take()
+	if err := ns.rate.Wait(context.TODO(), msg.Question[0].Qtype); err != nil {
+		return err
+	}
+
 	if err := conns.WriteMsg(msg, ns); err != nil {
 		msg := req.Message()
 
@@ -88,7 +92,7 @@ func (ns *nameserver) RequestResponse(resp *dns.Msg, at time.Time) {
 	}
 
 	rtt := at.Sub(req.SentAt())
-	ns.rate.ReportRTT(rtt)
+	ns.rate.ReportResponse(resp.Question[0].Qtype, resp.Rcode, rtt)
 
 	if resp.Truncated {
 		utils.TCPExchange(req, 3*time.Second)
