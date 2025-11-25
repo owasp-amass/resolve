@@ -18,6 +18,9 @@ import (
 const (
 	maxBackoff    = 5 * time.Millisecond
 	startingLimit = 20 * time.Millisecond
+	minimumLimit  = 10 * time.Millisecond
+	maximumLimit  = 100 * time.Millisecond
+	delay         = 500 * time.Microsecond
 )
 
 func newRateTrack() *rateTrack {
@@ -69,17 +72,37 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 	}
 
 	r.lastResponse = time.Now()
-	if rCode == dns.RcodeServerFailure || rCode == dns.RcodeRefused || rCode == types.RcodeNoResponse {
+	if rCode == dns.RcodeServerFailure || rCode == dns.RcodeRefused {
 		rl.errors++
-		delay := 500 * time.Microsecond
 		rl.limit += utils.TruncatedExponentialBackoff(rl.errors, delay, maxBackoff)
-		rl.limiter.SetLimit(rate.Every(rl.limit))
+		r.setLimitLocked(rrType, rl.limit)
+		return
+	} else if rCode == types.RcodeNoResponse {
+		if rl.errors > 0 {
+			rl.limit += utils.TruncatedExponentialBackoff(rl.errors, delay, maxBackoff)
+			r.setLimitLocked(rrType, rl.limit)
+		}
+		rl.errors++
 		return
 	}
 
 	if rtt < rl.limit {
 		rl.limit -= time.Millisecond
-		rl.limiter.SetLimit(rate.Every(rl.limit))
+		r.setLimitLocked(rrType, rl.limit)
 	}
 	rl.errors = 0
+}
+
+func (r *rateTrack) setLimitLocked(rrType uint16, limit time.Duration) {
+	rl := r.rrLimiters[rrType]
+
+	rl.limit = limit
+	if rl.limit < minimumLimit {
+		rl.limit = minimumLimit
+	}
+	if rl.limit > maximumLimit {
+		rl.limit = maximumLimit
+	}
+
+	rl.limiter.SetLimit(rate.Every(rl.limit))
 }
