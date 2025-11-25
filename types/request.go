@@ -15,7 +15,7 @@ import (
 const RcodeNoResponse int = 50
 
 // DefaultTimeout is the duration waited until a DNS query expires.
-const DefaultTimeout = 2 * time.Second
+const DefaultTimeout = 100 * time.Millisecond
 
 type Request interface {
 	Server() Nameserver
