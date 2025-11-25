@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxLimit      = 100 * time.Millisecond
+	maxBackoff    = 5 * time.Millisecond
 	startingLimit = 20 * time.Millisecond
 )
 
@@ -71,7 +71,8 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 	r.lastResponse = time.Now()
 	if rCode == dns.RcodeServerFailure || rCode == dns.RcodeRefused || rCode == types.RcodeNoResponse {
 		rl.errors++
-		rl.limit += utils.TruncatedExponentialBackoff(rl.errors, time.Millisecond, maxLimit-rl.limit)
+		delay := 500 * time.Microsecond
+		rl.limit += utils.TruncatedExponentialBackoff(rl.errors, delay, maxBackoff)
 		rl.limiter.SetLimit(rate.Every(rl.limit))
 		return
 	}

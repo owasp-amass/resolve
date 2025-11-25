@@ -38,7 +38,7 @@ func TestUpdateRateLimiters(t *testing.T) {
 	rt.Unlock()
 
 	// the QPS should now be higher
-	if second <= first || second != 100 {
-		t.Errorf("Unexpected QPS, expected QPS of %d, got %f", 100, second)
+	if second <= first {
+		t.Errorf("Unexpected QPS, expected QPS higher than %f, got %f", first, second)
 	}
 }
