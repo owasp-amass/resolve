@@ -16,11 +16,13 @@ import (
 )
 
 const (
-	maxBackoff    = 5 * time.Millisecond
-	startingLimit = 20 * time.Millisecond
-	minimumLimit  = 10 * time.Millisecond
-	maximumLimit  = 100 * time.Millisecond
-	delay         = 500 * time.Microsecond
+	startingLimit     = 20 * time.Millisecond
+	minimumLimit      = 10 * time.Millisecond
+	maximumLimit      = 100 * time.Millisecond
+	errorDelay        = time.Millisecond
+	timeoutDelay      = 250 * time.Microsecond
+	errorMaxBackoff   = 10 * time.Millisecond
+	timeoutMaxBackoff = 5 * time.Millisecond
 )
 
 func newRateTrack() *rateTrack {
@@ -64,6 +66,7 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 
 	r.Lock()
 	defer r.Unlock()
+	r.lastResponse = time.Now()
 
 	rl, found := r.rrLimiters[rrType]
 	if !found {
@@ -71,32 +74,30 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 		r.rrLimiters[rrType] = rl
 	}
 
-	r.lastResponse = time.Now()
-	if rCode == dns.RcodeServerFailure || rCode == dns.RcodeRefused {
+	switch rCode {
+	case dns.RcodeRefused:
+		fallthrough
+	case dns.RcodeServerFailure:
 		rl.errors++
-		rl.limit += utils.TruncatedExponentialBackoff(rl.errors, delay, maxBackoff)
-		r.setLimitLocked(rrType, rl.limit)
+		delay := utils.TruncatedExponentialBackoff(rl.errors, errorDelay, errorMaxBackoff)
+		r.setLimitLocked(rl, rl.limit+delay)
 		return
-	} else if rCode == types.RcodeNoResponse {
-		if rl.errors > 0 {
-			rl.limit += utils.TruncatedExponentialBackoff(rl.errors, delay, maxBackoff)
-			r.setLimitLocked(rrType, rl.limit)
-		}
+	case types.RcodeNoResponse:
 		rl.errors++
+		delay := utils.TruncatedExponentialBackoff(rl.errors, timeoutDelay, timeoutMaxBackoff)
+		r.setLimitLocked(rl, rl.limit+delay)
 		return
 	}
 
 	if rtt < rl.limit {
-		rl.limit -= time.Millisecond
-		r.setLimitLocked(rrType, rl.limit)
+		r.setLimitLocked(rl, rl.limit-time.Millisecond)
 	}
 	rl.errors = 0
 }
 
-func (r *rateTrack) setLimitLocked(rrType uint16, limit time.Duration) {
-	rl := r.rrLimiters[rrType]
-
+func (r *rateTrack) setLimitLocked(rl *rrLimiter, limit time.Duration) {
 	rl.limit = limit
+
 	if rl.limit < minimumLimit {
 		rl.limit = minimumLimit
 	}
