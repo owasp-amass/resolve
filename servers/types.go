@@ -20,9 +20,10 @@ type nameserver struct {
 }
 
 type rrLimiter struct {
-	limiter *rate.Limiter
-	limit   time.Duration
-	errors  int
+	limiter  *rate.Limiter
+	limit    time.Duration
+	errors   int
+	timeouts int
 }
 
 type rateTrack struct {

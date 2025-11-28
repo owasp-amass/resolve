@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	startingLimit     = 20 * time.Millisecond
+	startingLimit     = 50 * time.Millisecond
 	minimumLimit      = 10 * time.Millisecond
-	maximumLimit      = 100 * time.Millisecond
-	errorDelay        = time.Millisecond
-	timeoutDelay      = 250 * time.Microsecond
-	errorMaxBackoff   = 10 * time.Millisecond
+	maximumLimit      = 200 * time.Millisecond
+	errorDelay        = 2 * time.Millisecond
+	timeoutDelay      = 500 * time.Microsecond
+	errorMaxBackoff   = 20 * time.Millisecond
 	timeoutMaxBackoff = 5 * time.Millisecond
 )
 
@@ -83,16 +83,20 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 		r.setLimitLocked(rl, rl.limit+delay)
 		return
 	case types.RcodeNoResponse:
-		rl.errors++
-		delay := utils.TruncatedExponentialBackoff(rl.errors, timeoutDelay, timeoutMaxBackoff)
-		r.setLimitLocked(rl, rl.limit+delay)
+		rl.timeouts++
+		if rl.timeouts > 1 {
+			delay := utils.TruncatedExponentialBackoff(
+				rl.timeouts-1, timeoutDelay, timeoutMaxBackoff)
+			r.setLimitLocked(rl, rl.limit+delay)
+		}
 		return
 	}
 
 	if rtt < rl.limit {
-		r.setLimitLocked(rl, rl.limit-time.Millisecond)
+		r.setLimitLocked(rl, rl.limit-rtt)
 	}
 	rl.errors = 0
+	rl.timeouts = 0
 }
 
 func (r *rateTrack) setLimitLocked(rl *rrLimiter, limit time.Duration) {
