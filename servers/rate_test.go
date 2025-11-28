@@ -30,8 +30,11 @@ func TestUpdateRateLimiters(t *testing.T) {
 		t.Errorf("Unexpected QPS, expected QPS lower than %f, got %f", start, first)
 	}
 
-	_ = rt.Wait(context.Background(), 1)
-	rt.ReportResponse(1, dns.RcodeSuccess, 10*time.Millisecond)
+	// three successful responses below the current limit
+	for range 3 {
+		_ = rt.Wait(context.Background(), 1)
+		rt.ReportResponse(1, dns.RcodeSuccess, 10*time.Millisecond)
+	}
 
 	rt.Lock()
 	second := rt.rrLimiters[1].limiter.Limit()

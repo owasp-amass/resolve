@@ -60,7 +60,7 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 	if rrType <= dns.TypeNone || rrType > dns.TypeANY {
 		return
 	}
-	if rCode < dns.RcodeSuccess || rCode > dns.RcodeBadCookie {
+	if rCode < dns.RcodeSuccess || rCode > types.RcodeNoResponse {
 		return
 	}
 
@@ -74,29 +74,38 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 		r.rrLimiters[rrType] = rl
 	}
 
+	// check for errors and timeouts to adjust the rate limit accordingly
 	switch rCode {
 	case dns.RcodeRefused:
 		fallthrough
 	case dns.RcodeServerFailure:
-		rl.errors++
-		delay := utils.TruncatedExponentialBackoff(rl.errors, errorDelay, errorMaxBackoff)
+		rl.ecount++
+		delay := utils.TruncatedExponentialBackoff(rl.ecount, errorDelay, errorMaxBackoff)
 		r.setLimitLocked(rl, rl.limit+delay)
+		rl.scount = 0
 		return
 	case types.RcodeNoResponse:
-		rl.timeouts++
-		if rl.timeouts > 1 {
-			delay := utils.TruncatedExponentialBackoff(
-				rl.timeouts-1, timeoutDelay, timeoutMaxBackoff)
+		rl.tcount++
+		if rl.tcount > 1 { // ignore first timeout
+			delay := utils.TruncatedExponentialBackoff(rl.tcount-1, timeoutDelay, timeoutMaxBackoff)
 			r.setLimitLocked(rl, rl.limit+delay)
 		}
+		rl.scount = 0
 		return
 	}
 
-	if rtt < rl.limit {
+	// successful response
+	rl.ecount = 0
+	rl.tcount = 0
+	rl.scount++
+
+	if rl.scount >= 3 && rtt < rl.limit {
+		// decrease the limit after 3 consecutive successful responses below the current limit
+		r.setLimitLocked(rl, (rl.limit+rtt)/2)
+	} else if rtt > rl.limit {
+		// increase the limit if the response time is above the current limit
 		r.setLimitLocked(rl, (rl.limit+rtt)/2)
 	}
-	rl.errors = 0
-	rl.timeouts = 0
 }
 
 func (r *rateTrack) setLimitLocked(rl *rrLimiter, limit time.Duration) {
