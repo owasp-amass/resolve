@@ -93,7 +93,7 @@ func (r *rateTrack) ReportResponse(rrType uint16, rCode int, rtt time.Duration) 
 	}
 
 	if rtt < rl.limit {
-		r.setLimitLocked(rl, rl.limit-rtt)
+		r.setLimitLocked(rl, (rl.limit+rtt)/2)
 	}
 	rl.errors = 0
 	rl.timeouts = 0
