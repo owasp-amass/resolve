@@ -26,7 +26,7 @@ func NewServerPool(timeout time.Duration, logger *log.Logger, addrs ...string) *
 		for _, addrstr := range addrs {
 			servs = append(servs, servers.NewNameserver(addrstr))
 		}
-		sel = selectors.NewRandom(timeout, servs...)
+		sel = selectors.NewRoundRobin(timeout, servs...)
 	}
 
 	conns := conn.New(runtime.NumCPU(), sel)

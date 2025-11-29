@@ -172,7 +172,7 @@ func (p *params) SetupResolverPool(list []string, rpath string, qps, timeout int
 		for _, addrstr := range list {
 			servs = append(servs, servers.NewNameserver(addrstr))
 		}
-		sel = selectors.NewRandom(delay, servs...)
+		sel = selectors.NewRoundRobin(delay, servs...)
 	}
 
 	conns := conn.New(runtime.NumCPU(), sel)

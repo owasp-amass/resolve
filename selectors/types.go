@@ -6,6 +6,7 @@ package selectors
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
@@ -17,9 +18,10 @@ type single struct {
 	server  types.Nameserver
 }
 
-type random struct {
+type roundRobin struct {
 	done    chan struct{}
 	timeout time.Duration
+	current atomic.Uint32
 	list    []types.Nameserver
 	lookup  map[string]types.Nameserver
 }

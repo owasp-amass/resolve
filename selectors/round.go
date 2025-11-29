@@ -6,18 +6,17 @@ package selectors
 
 import (
 	"errors"
-	"math/rand"
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
 )
 
-func NewRandom(timeout time.Duration, servs ...types.Nameserver) *random {
+func NewRoundRobin(timeout time.Duration, servs ...types.Nameserver) *roundRobin {
 	if len(servs) == 0 {
 		return nil
 	}
 
-	r := &random{
+	r := &roundRobin{
 		done:    make(chan struct{}, 1),
 		timeout: timeout,
 		lookup:  make(map[string]types.Nameserver),
@@ -32,25 +31,42 @@ func NewRandom(timeout time.Duration, servs ...types.Nameserver) *random {
 	return r
 }
 
-// Get performs random selection on the pool of nameservers.
-func (r *random) Get(fqdn string) (types.Nameserver, error) {
+// Get performs round robin selection on the pool of nameservers.
+func (r *roundRobin) Get(fqdn string) (types.Nameserver, error) {
 	select {
 	case <-r.done:
 		return nil, errors.New("the selector has been closed")
 	default:
 	}
 
-	if l := len(r.list); l == 0 {
+	var idx uint32
+	llen := len(r.list)
+	if llen == 0 {
 		return nil, errors.New("the selector has no nameservers")
-	} else if l == 1 {
-		return r.list[0], nil
+	} else if llen > 1 {
+		idx = r.nextIndex(uint32(llen))
 	}
 
-	sel := rand.Intn(len(r.list))
-	return r.list[sel], nil
+	return r.list[idx], nil
 }
 
-func (r *random) Lookup(addr string) (types.Nameserver, error) {
+func (r *roundRobin) nextIndex(max uint32) uint32 {
+	value := r.current.Add(1)
+
+	if value < max {
+		return value
+	}
+
+	normalized := value % max
+	if normalized == 0 {
+		r.current.Add(-max)
+		return 0
+	}
+
+	return normalized
+}
+
+func (r *roundRobin) Lookup(addr string) (types.Nameserver, error) {
 	select {
 	case <-r.done:
 		return nil, errors.New("the selector has been closed")
@@ -63,7 +79,7 @@ func (r *random) Lookup(addr string) (types.Nameserver, error) {
 	return nil, errors.New("the selector does not have the requested nameserver")
 }
 
-func (r *random) All() []types.Nameserver {
+func (r *roundRobin) All() []types.Nameserver {
 	select {
 	case <-r.done:
 		return nil
@@ -72,7 +88,7 @@ func (r *random) All() []types.Nameserver {
 	return r.list
 }
 
-func (r *random) Close() {
+func (r *roundRobin) Close() {
 	close(r.done)
 
 	for _, ns := range r.All() {
@@ -83,7 +99,7 @@ func (r *random) Close() {
 	r.lookup = nil
 }
 
-func (r *random) timeouts() {
+func (r *roundRobin) timeouts() {
 	t := time.NewTimer(r.timeout)
 	defer t.Stop()
 
