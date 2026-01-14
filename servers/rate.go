@@ -16,13 +16,13 @@ import (
 )
 
 const (
-	startingLimit     = 50 * time.Millisecond
-	minimumLimit      = 10 * time.Millisecond
+	startingLimit     = 100 * time.Millisecond
+	minimumLimit      = 50 * time.Millisecond
 	maximumLimit      = 200 * time.Millisecond
-	errorDelay        = 2 * time.Millisecond
-	timeoutDelay      = 500 * time.Microsecond
-	errorMaxBackoff   = 20 * time.Millisecond
-	timeoutMaxBackoff = 5 * time.Millisecond
+	errorDelay        = 200 * time.Millisecond
+	timeoutDelay      = 100 * time.Millisecond
+	errorMaxBackoff   = 5 * time.Second
+	timeoutMaxBackoff = 1 * time.Second
 )
 
 func newRateTrack() *rateTrack {
