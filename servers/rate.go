@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	startingLimit     = 100 * time.Millisecond
-	minimumLimit      = 50 * time.Millisecond
-	maximumLimit      = 200 * time.Millisecond
+	startingLimit     = 200 * time.Millisecond
+	minimumLimit      = 100 * time.Millisecond
+	maximumLimit      = 500 * time.Millisecond
 	errorDelay        = 200 * time.Millisecond
 	timeoutDelay      = 100 * time.Millisecond
 	errorMaxBackoff   = 5 * time.Second
