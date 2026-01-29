@@ -1,10 +1,11 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
 package servers
 
 import (
+	"context"
 	"runtime"
 	"testing"
 	"time"
@@ -126,7 +127,7 @@ func TestNsecTraversal(t *testing.T) {
 	defer sel.Close()
 	defer conns.Close()
 
-	names, err := serv.NsecTraversal("walk.com", conns)
+	names, err := serv.NsecTraversal(context.Background(), "walk.com", conns)
 	if err != nil {
 		t.Errorf("The NSEC traversal was not successful: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestBadNsecTraversal(t *testing.T) {
 	defer sel.Close()
 	defer conns.Close()
 
-	if _, err := serv.NsecTraversal("walk.com", conns); err == nil {
+	if _, err := serv.NsecTraversal(context.Background(), "walk.com", conns); err == nil {
 		t.Errorf("The NSEC traversal failed to return an error when the NSEC record was absent")
 	}
 }

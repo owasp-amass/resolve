@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -16,9 +16,9 @@ type Nameserver interface {
 	Address() *net.UDPAddr
 	XchgManager() XchgManager
 	RateMonitor() RateTrack
-	SendRequest(req Request, conns Conn) error
+	SendRequest(ctx context.Context, req Request, conns Conn) error
 	RequestResponse(resp *dns.Msg, at time.Time)
-	NsecTraversal(domain string, conns Conn) ([]*dns.NSEC, error)
+	NsecTraversal(ctx context.Context, domain string, conns Conn) ([]*dns.NSEC, error)
 	Close()
 }
 

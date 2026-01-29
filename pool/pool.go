@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -65,7 +65,7 @@ func (r *Pool) Query(ctx context.Context, msg *dns.Msg, ch chan *dns.Msg) {
 	case <-ctx.Done():
 	case <-r.done:
 	default:
-		go r.processSingleReq(types.NewRequest(msg, ch))
+		go r.processSingleReq(ctx, types.NewRequest(msg, ch))
 		return
 	}
 
@@ -90,10 +90,15 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 	}
 
 	var err error
+	var resp *dns.Msg
 	ch := r.QueryChan(ctx, msg)
-	defer close(ch)
 
-	resp := <-ch
+	select {
+	case <-ctx.Done():
+		return msg, errors.New("the context expired")
+	case resp = <-ch:
+	}
+
 	if resp == nil {
 		err = errors.New("query failed")
 	} else if resp.Rcode == types.RcodeNoResponse {
@@ -102,14 +107,14 @@ func (r *Pool) Exchange(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
 	return resp, err
 }
 
-func (r *Pool) processSingleReq(req types.Request) {
+func (r *Pool) processSingleReq(ctx context.Context, req types.Request) {
 	name := req.Message().Question[0].Name
 
 	if serv, err := r.Selector.Get(name); err == nil {
-		_ = r.rate.Wait(context.TODO())
-
-		if err := serv.SendRequest(req, r.Conns); err == nil {
-			return
+		if err := r.rate.Wait(ctx); err == nil {
+			if err := serv.SendRequest(ctx, req, r.Conns); err == nil {
+				return
+			}
 		}
 	}
 

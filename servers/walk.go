@@ -1,10 +1,11 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
 package servers
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/miekg/dns"
@@ -13,13 +14,13 @@ import (
 )
 
 // NsecTraversal attempts to retrieve a DNS zone using NSEC-walking.
-func (ns *nameserver) NsecTraversal(domain string, conns types.Conn) ([]*dns.NSEC, error) {
+func (ns *nameserver) NsecTraversal(ctx context.Context, domain string, conns types.Conn) ([]*dns.NSEC, error) {
 	domain = domain + "." // Ensure the domain name has a period at the end
 
 	var results []*dns.NSEC
 	names := make(map[string]struct{})
 	for next := domain; true; {
-		nsec, err := ns.searchGap(next, conns)
+		nsec, err := ns.searchGap(ctx, next, conns)
 		if err != nil {
 			return results, err
 		}
@@ -39,13 +40,13 @@ func (ns *nameserver) NsecTraversal(domain string, conns types.Conn) ([]*dns.NSE
 	return results, nil
 }
 
-func (ns *nameserver) searchGap(name string, conns types.Conn) (*dns.NSEC, error) {
+func (ns *nameserver) searchGap(ctx context.Context, name string, conns types.Conn) (*dns.NSEC, error) {
 	for i := 0; i < 10; i++ {
 		ch := make(chan *dns.Msg, 1)
 		defer close(ch)
 
 		req := types.NewRequest(utils.WalkMsg(name, dns.TypeNSEC), ch)
-		if err := ns.SendRequest(req, conns); err != nil {
+		if err := ns.SendRequest(ctx, req, conns); err != nil {
 			req.Release()
 			continue
 		}

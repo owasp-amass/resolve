@@ -1,4 +1,4 @@
-// Copyright © by Jeff Foley 2017-2025. All rights reserved.
+// Copyright © by Jeff Foley 2017-2026. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -58,7 +58,7 @@ func (ns *nameserver) Close() {
 	}
 }
 
-func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
+func (ns *nameserver) SendRequest(ctx context.Context, req types.Request, conns types.Conn) error {
 	if req.Message() == nil {
 		return errors.New("the request message is nil")
 	}
@@ -68,11 +68,9 @@ func (ns *nameserver) SendRequest(req types.Request, conns types.Conn) error {
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
-
-	if err := ns.rate.Wait(context.TODO(), msg.Question[0].Qtype); err != nil {
+	if err := ns.rate.Wait(ctx, msg.Question[0].Qtype); err != nil {
 		return err
 	}
-
 	if err := conns.WriteMsg(msg, ns); err != nil {
 		msg := req.Message()
 
