@@ -18,7 +18,10 @@ func TCPExchange(req types.Request, timeout time.Duration) {
 	}
 
 	msg := req.Message().Copy()
-	if resp, _, err := client.Exchange(msg, req.Server().Address().String()); err == nil && resp != nil {
+	// A response carrying no question cannot be matched to its request, and
+	// callers index resp.Question[0]. The UDP path already drops these in
+	// conn.readMessages; do the same for the TCP retry.
+	if resp, _, err := client.Exchange(msg, req.Server().Address().String()); err == nil && resp != nil && len(resp.Question) > 0 {
 		go func() {
 			req.SendResponse(resp)
 			req.Release()
