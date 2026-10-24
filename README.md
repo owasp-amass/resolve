@@ -17,7 +17,7 @@ Designed to support DNS brute-forcing with minimal system resources:
 ## Installation [![Go Version](https://img.shields.io/github/go-mod/go-version/owasp-amass/resolve)](https://golang.org/dl/)
 
 ```bash
-go get -v -u github.com/owasp-amass/resolve@master
+go get -v -u github.com/owasp-amass/resolve@main
 ```
 
 ## Usage
