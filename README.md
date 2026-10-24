@@ -1,7 +1,6 @@
 ![GitHub Test Status](https://github.com/owasp-amass/resolve/workflows/tests/badge.svg)
 [![GoDoc](https://img.shields.io/static/v1?label=godoc&message=reference&color=blue)](https://pkg.go.dev/github.com/owasp-amass/resolve?tab=overview)
 [![License](https://img.shields.io/github/license/owasp-amass/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Go Report](https://goreportcard.com/badge/github.com/owasp-amass/resolve)](https://goreportcard.com/report/github.com/owasp-amass/resolve)
 [![CodeFactor](https://www.codefactor.io/repository/github/owasp-amass/resolve/badge)](https://www.codefactor.io/repository/github/owasp-amass/resolve)
 [![Maintainability](https://api.codeclimate.com/v1/badges/35fb58e657b0f94870b0/maintainability)](https://codeclimate.com/github/owasp-amass/resolve/maintainability)
 [![codecov](https://codecov.io/gh/owasp-amass/resolve/branch/master/graph/badge.svg?token=HDCWO273A1)](https://codecov.io/gh/owasp-amass/resolve)
