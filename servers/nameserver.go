@@ -68,7 +68,13 @@ func (ns *nameserver) SendRequest(ctx context.Context, req types.Request, conns 
 	if err := ns.xchgs.Add(req); err != nil {
 		return err
 	}
+	// The request is now registered in xchgs. If the rate limiter aborts
+	// (a cancelled or expired context), remove it again before returning:
+	// otherwise the caller releases the request back to the pool while it is
+	// still reachable in xchgs, and a later response delivers to the reused
+	// request and double-releases it.
 	if err := ns.rate.Wait(ctx, msg.Question[0].Qtype); err != nil {
+		ns.xchgs.Remove(msg.Id, msg.Question[0].Name)
 		return err
 	}
 	if err := conns.WriteMsg(msg, ns); err != nil {

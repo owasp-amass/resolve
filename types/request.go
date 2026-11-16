@@ -86,7 +86,7 @@ func (r *request) Message() *dns.Msg {
 	return r.msg
 }
 
-func (r *request) SendResponse(resp *dns.Msg) { r.resp <- resp }
+func (r *request) SendResponse(resp *dns.Msg) { r.deliver(resp) }
 
 func (r *request) NoResponse() {
 	r.Lock()
@@ -94,7 +94,23 @@ func (r *request) NoResponse() {
 	r.Unlock()
 
 	resp.Rcode = RcodeNoResponse
-	r.resp <- resp
+	r.deliver(resp)
+}
+
+// deliver sends resp on the caller's response channel without ever crashing
+// the process. The channel is owned by the caller, which may have stopped
+// listening and closed it after a timeout, a cancellation, or an earlier
+// answer; a late or duplicate response for a request nobody is waiting on is
+// safe to drop. Every response channel in this module is buffered, so the
+// non-blocking send still delivers the one expected answer and only skips a
+// send that would otherwise block on a full buffer or panic on a closed one.
+func (r *request) deliver(resp *dns.Msg) {
+	defer func() { _ = recover() }()
+
+	select {
+	case r.resp <- resp:
+	default:
+	}
 }
 
 func (r *request) Release() {
