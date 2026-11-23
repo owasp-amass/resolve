@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
 func NewSingle(timeout time.Duration, serv types.Nameserver) *single {
@@ -42,12 +43,7 @@ func (r *single) timeouts() {
 		case <-t.C:
 		}
 
-		for _, req := range r.server.XchgManager().RemoveExpired(r.timeout) {
-			go func(req types.Request) {
-				req.NoResponse()
-				req.Release()
-			}(req)
-		}
+		utils.ExpireRequests(r.server, r.timeout)
 
 		t.Reset(r.timeout)
 	}

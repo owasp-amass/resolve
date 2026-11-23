@@ -7,32 +7,63 @@ package conn
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/miekg/dns"
 	"github.com/owasp-amass/resolve/types"
 )
 
+// socketAttempts is how many times New tries to open each socket.
+const socketAttempts = 3
+
 type Conn struct {
 	done  chan struct{}
 	conns chan *connection
 	sel   types.Selector
+	laddr netip.Addr
 	cpus  int
 }
 
-func New(cpus int, sel types.Selector) *Conn {
+// Option configures the connections New returns.
+type Option func(*Conn)
+
+// LocalAddr binds the UDP sockets to the local address, so the queries leave
+// through the network interface that has it. The zero Addr leaves the choice
+// to the system.
+func LocalAddr(addr netip.Addr) Option {
+	return func(c *Conn) {
+		c.laddr = addr
+	}
+}
+
+// New opens cpus UDP sockets that send queries to the selector's nameservers
+// and pass their responses back. It returns nil when the sockets cannot be
+// opened, such as when the local address is not on any network interface.
+func New(cpus int, sel types.Selector, opts ...Option) *Conn {
 	conn := &Conn{
 		done:  make(chan struct{}),
 		conns: make(chan *connection, cpus),
 		sel:   sel,
 		cpus:  cpus,
 	}
+	for _, opt := range opts {
+		opt(conn)
+	}
 
-	for i := 0; i < cpus; {
-		if c := newConnection(sel.Lookup); c != nil {
-			i++
-			conn.conns <- c
+	for i := 0; i < cpus; i++ {
+		var c *connection
+		for a := 0; a < socketAttempts && c == nil; a++ {
+			c = newConnection(conn.laddr, sel.Lookup)
 		}
+
+		if c == nil {
+			for ; i > 0; i-- {
+				(<-conn.conns).close()
+			}
+			return nil
+		}
+		conn.conns <- c
 	}
 	return conn
 }
@@ -60,15 +91,17 @@ func (r *Conn) get() *connection {
 	return nil
 }
 
+// put returns the connection to the pool, replacing it when it has expired.
+// When a new socket cannot be opened, the old one stays in use, so the pool
+// keeps all its connections and Close finds every one.
 func (r *Conn) put(c *connection) {
 	if c.expired() {
-		go delayedClose(c)
-		c = newConnection(r.sel.Lookup)
+		if nc := newConnection(r.laddr, r.sel.Lookup); nc != nil {
+			go delayedClose(c)
+			c = nc
+		}
 	}
-
-	if c != nil {
-		r.conns <- c
-	}
+	r.conns <- c
 }
 
 func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {

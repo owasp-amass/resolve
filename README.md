@@ -74,6 +74,37 @@ for {
 }
 ```
 
+### Sharing nameservers between pools
+
+A `servers.Registry` holds one nameserver per address for any number of pools, so a cap on the
+queries per second sent to each nameserver holds across all of them. The registry expires the
+unanswered queries itself, and `selectors.NewSharedRoundRobin` selects its nameservers without
+closing them when a pool is done. `conn.LocalAddr` binds a pool's UDP sockets to a local address,
+so its queries leave through the network interface that has it.
+
+```go
+reg := servers.NewRegistry(250*time.Millisecond, 15) // at most 15 queries per second per nameserver
+defer reg.Close()
+
+var servs []types.Nameserver
+for _, addr := range []string{"8.8.8.8", "1.1.1.1"} {
+	ns, err := reg.Get(addr)
+	if err != nil {
+		return err
+	}
+	servs = append(servs, ns)
+}
+
+sel := selectors.NewSharedRoundRobin(servs...)
+conns := conn.New(runtime.NumCPU(), sel, conn.LocalAddr(netip.MustParseAddr("192.0.2.10")))
+if conns == nil {
+	return errors.New("the local address is not on a network interface")
+}
+p := pool.New(0, sel, conns, nil)
+defer conns.Close()
+defer p.Stop()
+```
+
 ## Licensing [![License](https://img.shields.io/github/license/owasp-amass/resolve)](https://www.apache.org/licenses/LICENSE-2.0)
 
 This program is free software: you can redistribute it and/or modify it under the terms of the [Apache license](LICENSE).

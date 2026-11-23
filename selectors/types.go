@@ -20,6 +20,7 @@ type single struct {
 
 type roundRobin struct {
 	done    chan struct{}
+	shared  bool
 	timeout time.Duration
 	current atomic.Uint32
 	list    []types.Nameserver

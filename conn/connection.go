@@ -6,6 +6,7 @@ package conn
 
 import (
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/miekg/dns"
@@ -25,8 +26,8 @@ type connection struct {
 	lookup    func(addr string) (types.Nameserver, error)
 }
 
-func newConnection(lookup func(addr string) (types.Nameserver, error)) *connection {
-	pc, err := net.ListenPacket("udp", ":0")
+func newConnection(laddr netip.Addr, lookup func(addr string) (types.Nameserver, error)) *connection {
+	pc, err := listen(laddr)
 	if err != nil {
 		return nil
 	}
@@ -41,6 +42,21 @@ func newConnection(lookup func(addr string) (types.Nameserver, error)) *connecti
 
 	go c.responses()
 	return c
+}
+
+// listen opens a UDP socket on the local address, or on every local address
+// when it is the zero Addr. A socket bound to an IPv4 address reaches only
+// IPv4 nameservers, and one bound to an IPv6 address only IPv6 nameservers.
+func listen(laddr netip.Addr) (net.PacketConn, error) {
+	if !laddr.IsValid() {
+		return net.ListenPacket("udp", ":0")
+	}
+
+	pc, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(netip.AddrPortFrom(laddr.Unmap(), 0)))
+	if err != nil {
+		return nil, err
+	}
+	return pc, nil
 }
 
 func (c *connection) close() {

@@ -30,6 +30,7 @@ type rrLimiter struct {
 type rateTrack struct {
 	sync.Mutex
 	rrLimiters   map[uint16]*rrLimiter
+	max          *rate.Limiter
 	lastResponse time.Time
 }
 

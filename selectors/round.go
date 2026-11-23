@@ -9,15 +9,34 @@ import (
 	"time"
 
 	"github.com/owasp-amass/resolve/types"
+	"github.com/owasp-amass/resolve/utils"
 )
 
+// NewRoundRobin returns a selector that owns its nameservers: it expires
+// their unanswered queries after timeout, and its Close closes them.
 func NewRoundRobin(timeout time.Duration, servs ...types.Nameserver) *roundRobin {
+	r := newRoundRobin(false, timeout, servs...)
+	if r != nil {
+		go r.timeouts()
+	}
+	return r
+}
+
+// NewSharedRoundRobin returns a selector over nameservers that other
+// selectors use too, such as those of a servers.Registry. Their owner
+// expires their queries, and Close leaves them open.
+func NewSharedRoundRobin(servs ...types.Nameserver) *roundRobin {
+	return newRoundRobin(true, 0, servs...)
+}
+
+func newRoundRobin(shared bool, timeout time.Duration, servs ...types.Nameserver) *roundRobin {
 	if len(servs) == 0 {
 		return nil
 	}
 
 	r := &roundRobin{
 		done:    make(chan struct{}, 1),
+		shared:  shared,
 		timeout: timeout,
 		lookup:  make(map[string]types.Nameserver),
 	}
@@ -26,8 +45,6 @@ func NewRoundRobin(timeout time.Duration, servs ...types.Nameserver) *roundRobin
 		r.list = append(r.list, ns)
 		r.lookup[ns.Address().IP.String()] = ns
 	}
-
-	go r.timeouts()
 	return r
 }
 
@@ -89,11 +106,12 @@ func (r *roundRobin) All() []types.Nameserver {
 }
 
 func (r *roundRobin) Close() {
-	close(r.done)
-
-	for _, ns := range r.All() {
-		ns.Close()
+	if !r.shared {
+		for _, ns := range r.All() {
+			ns.Close()
+		}
 	}
+	close(r.done)
 
 	r.list = nil
 	r.lookup = nil
@@ -111,12 +129,7 @@ func (r *roundRobin) timeouts() {
 		}
 
 		for _, ns := range r.All() {
-			for _, req := range ns.XchgManager().RemoveExpired(r.timeout) {
-				go func(req types.Request) {
-					req.NoResponse()
-					req.Release()
-				}(req)
-			}
+			utils.ExpireRequests(ns, r.timeout)
 		}
 
 		t.Reset(r.timeout)

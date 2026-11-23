@@ -28,7 +28,18 @@ const (
 func newRateTrack() *rateTrack {
 	return &rateTrack{
 		rrLimiters: make(map[uint16]*rrLimiter),
+		max:        rate.NewLimiter(rate.Inf, 1),
 	}
+}
+
+// setMaxQPS caps the queries per second sent to the nameserver, whatever the
+// adaptive per-type limits allow. Zero or less removes the cap.
+func (r *rateTrack) setMaxQPS(qps int) {
+	limit := rate.Inf
+	if qps > 0 {
+		limit = rate.Limit(qps)
+	}
+	r.max.SetLimit(limit)
 }
 
 func newRRLimiter() *rrLimiter {
@@ -52,7 +63,10 @@ func (r *rateTrack) Wait(ctx context.Context, rrType uint16) error {
 	}
 	r.Unlock()
 
-	return rl.limiter.Wait(ctx)
+	if err := rl.limiter.Wait(ctx); err != nil {
+		return err
+	}
+	return r.max.Wait(ctx)
 }
 
 // ReportResponse accepts response information for a DNS query request.
