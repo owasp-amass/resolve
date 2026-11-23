@@ -79,8 +79,9 @@ for {
 A `servers.Registry` holds one nameserver per address for any number of pools, so a cap on the
 queries per second sent to each nameserver holds across all of them. The registry expires the
 unanswered queries itself, and `selectors.NewSharedRoundRobin` selects its nameservers without
-closing them when a pool is done. `conn.LocalAddr` binds a pool's UDP sockets to a local address,
-so its queries leave through the network interface that has it.
+closing them when a pool is done. `conn.LocalAddr` binds a pool's UDP sockets to local addresses,
+one per IP version, so its queries leave through the network interface that has them; a
+nameserver whose IP version has no address is not reached.
 
 ```go
 reg := servers.NewRegistry(250*time.Millisecond, 15) // at most 15 queries per second per nameserver
@@ -96,7 +97,7 @@ for _, addr := range []string{"8.8.8.8", "1.1.1.1"} {
 }
 
 sel := selectors.NewSharedRoundRobin(servs...)
-conns := conn.New(runtime.NumCPU(), sel, conn.LocalAddr(netip.MustParseAddr("192.0.2.10")))
+conns := conn.New(runtime.NumCPU(), sel, conn.LocalAddr(netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10")))
 if conns == nil {
 	return errors.New("the local address is not on a network interface")
 }

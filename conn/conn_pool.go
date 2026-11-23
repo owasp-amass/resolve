@@ -18,22 +18,34 @@ import (
 const socketAttempts = 3
 
 type Conn struct {
-	done  chan struct{}
-	conns chan *connection
-	sel   types.Selector
-	laddr netip.Addr
-	cpus  int
+	done   chan struct{}
+	conns  chan *connection
+	sel    types.Selector
+	laddrs []netip.Addr
+	cpus   int
 }
 
 // Option configures the connections New returns.
 type Option func(*Conn)
 
-// LocalAddr binds the UDP sockets to the local address, so the queries leave
-// through the network interface that has it. The zero Addr leaves the choice
-// to the system.
-func LocalAddr(addr netip.Addr) Option {
+// LocalAddr binds the UDP sockets to the local addresses, at most one per IP
+// version (the first of each), so the queries leave through the network
+// interface that has them. A nameserver whose IP version has no address is
+// not reached. Zero Addrs are ignored, and with none the system chooses.
+func LocalAddr(addrs ...netip.Addr) Option {
 	return func(c *Conn) {
-		c.laddr = addr
+		var v4, v6 bool
+		for _, a := range addrs {
+			switch a = a.Unmap(); {
+			case a.Is4() && !v4:
+				v4 = true
+			case a.Is6() && !v6:
+				v6 = true
+			default:
+				continue
+			}
+			c.laddrs = append(c.laddrs, a)
+		}
 	}
 }
 
@@ -54,7 +66,7 @@ func New(cpus int, sel types.Selector, opts ...Option) *Conn {
 	for i := 0; i < cpus; i++ {
 		var c *connection
 		for a := 0; a < socketAttempts && c == nil; a++ {
-			c = newConnection(conn.laddr, sel.Lookup)
+			c = newConnection(conn.laddrs, sel.Lookup)
 		}
 
 		if c == nil {
@@ -96,7 +108,7 @@ func (r *Conn) get() *connection {
 // keeps all its connections and Close finds every one.
 func (r *Conn) put(c *connection) {
 	if c.expired() {
-		if nc := newConnection(r.laddr, r.sel.Lookup); nc != nil {
+		if nc := newConnection(r.laddrs, r.sel.Lookup); nc != nil {
 			go delayedClose(c)
 			c = nc
 		}
@@ -122,17 +134,22 @@ func (r *Conn) WriteMsg(msg *dns.Msg, ns types.Nameserver) error {
 	}
 	defer r.put(c)
 
+	pc, err := c.socket(ns.Address())
+	if err != nil {
+		return err
+	}
+
 	if err := ns.XchgManager().Modify(msg.Id, msg.Question[0].Name, func(req types.Request) {
 		req.SetSentAt(time.Now())
 	}); err != nil {
 		return err
 	}
 
-	if err := c.conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+	if err := pc.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
 		return err
 	}
 
-	n, err := c.conn.WriteTo(out, ns.Address())
+	n, err := pc.WriteTo(out, ns.Address())
 	if err == nil && n < len(out) {
 		err = fmt.Errorf("only wrote %d bytes of the %d byte message", n, len(out))
 	}

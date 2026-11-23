@@ -24,7 +24,7 @@ func (noServers) Close()                                  {}
 func TestNewLocalAddr(t *testing.T) {
 	loopback := netip.MustParseAddr("127.0.0.1")
 
-	c := New(2, noServers{}, LocalAddr(loopback))
+	c := New(2, noServers{}, LocalAddr(netip.Addr{}, loopback, netip.MustParseAddr("127.0.0.2")))
 	if c == nil {
 		t.Fatal("New could not bind to the loopback address")
 	}
@@ -35,12 +35,64 @@ func TestNewLocalAddr(t *testing.T) {
 		if conn == nil {
 			t.Fatal("the pool has fewer connections than it opened")
 		}
-
-		addr, ok := conn.conn.LocalAddr().(*net.UDPAddr)
-		if !ok || !addr.IP.Equal(net.IPv4(127, 0, 0, 1)) {
-			t.Errorf("the socket is bound to %v, want 127.0.0.1", conn.conn.LocalAddr())
-		}
 		defer c.put(conn)
+
+		// the zero Addr is ignored, and only the first IPv4 address is used
+		if len(conn.socks) != 1 {
+			t.Fatalf("the connection has %d sockets, want 1", len(conn.socks))
+		}
+		addr, ok := conn.socks[0].LocalAddr().(*net.UDPAddr)
+		if !ok || !addr.IP.Equal(net.IPv4(127, 0, 0, 1)) {
+			t.Errorf("the socket is bound to %v, want 127.0.0.1", conn.socks[0].LocalAddr())
+		}
+
+		if _, err := conn.socket(&net.UDPAddr{IP: net.ParseIP("192.0.2.53"), Port: 53}); err != nil {
+			t.Errorf("no socket for an IPv4 nameserver: %v", err)
+		}
+		if _, err := conn.socket(&net.UDPAddr{IP: net.ParseIP("2001:db8::53"), Port: 53}); err == nil {
+			t.Error("an IPv4-only connection offered a socket for an IPv6 nameserver")
+		}
+	}
+}
+
+func TestNewLocalAddrBothVersions(t *testing.T) {
+	c := New(1, noServers{}, LocalAddr(netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("::1")))
+	if c == nil {
+		t.Skip("this host cannot bind to both 127.0.0.1 and ::1")
+	}
+	defer c.Close()
+
+	conn := c.get()
+	defer c.put(conn)
+
+	for _, ip := range []string{"192.0.2.53", "2001:db8::53"} {
+		pc, err := conn.socket(&net.UDPAddr{IP: net.ParseIP(ip), Port: 53})
+		if err != nil {
+			t.Errorf("no socket for %s: %v", ip, err)
+			continue
+		}
+
+		la := pc.LocalAddr().(*net.UDPAddr)
+		if (la.IP.To4() != nil) != (net.ParseIP(ip).To4() != nil) {
+			t.Errorf("the socket for %s is bound to %v", ip, la)
+		}
+	}
+}
+
+func TestNewUnbound(t *testing.T) {
+	c := New(1, noServers{})
+	if c == nil {
+		t.Fatal("New could not open an unbound socket")
+	}
+	defer c.Close()
+
+	conn := c.get()
+	defer c.put(conn)
+
+	for _, ip := range []string{"192.0.2.53", "2001:db8::53"} {
+		if _, err := conn.socket(&net.UDPAddr{IP: net.ParseIP(ip), Port: 53}); err != nil {
+			t.Errorf("the unbound socket does not reach %s: %v", ip, err)
+		}
 	}
 }
 
